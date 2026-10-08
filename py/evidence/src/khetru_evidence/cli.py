@@ -1,8 +1,9 @@
-"""`evidence` command line. Subcommands are added per unit; U2 provides `verify`."""
+"""`evidence` command line. Subcommands are added per unit: `verify` (U2), `archive` (U5)."""
 
 import argparse
 import subprocess
 import sys
+from datetime import UTC, date, datetime
 from pathlib import Path, PurePosixPath
 
 from khetru_evidence.ledger import WRITE_ONCE_DIRS, Ledger
@@ -20,6 +21,23 @@ def main(argv: list[str] | None = None) -> int:
     verify_cmd.add_argument("--base", required=True, help="git ref or tree to compare against")
     verify_cmd.add_argument("--repo", type=Path, help="repository root (default: current repo)")
     verify_cmd.set_defaults(run=_run_verify)
+
+    archive_cmd = commands.add_parser(
+        "archive", help="save a day's ECMWF open-data ENS runs (1 Oct-30 Nov) as write-once inputs"
+    )
+    archive_cmd.add_argument(
+        "--date", type=date.fromisoformat, help="run date YYYY-MM-DD (default: today, UTC)"
+    )
+    archive_cmd.add_argument(
+        "--time", type=int, choices=(0, 12), action="append", dest="hours",
+        help="run hour UTC; repeat for both (default: 0 and 12)",
+    )
+    archive_cmd.add_argument(
+        "--source", default="ecmwf", choices=("ecmwf", "aws", "azure", "google"),
+        help="open-data mirror (default: ecmwf)",
+    )
+    archive_cmd.add_argument("--repo", type=Path, help="repository root (default: current repo)")
+    archive_cmd.set_defaults(run=_run_archive)
 
     args = parser.parse_args(argv)
     return args.run(args)
@@ -40,6 +58,15 @@ def _run_verify(args: argparse.Namespace) -> int:
         return 1
     print("evidence verify: ok")
     return 0
+
+
+def _run_archive(args: argparse.Namespace) -> int:
+    from khetru_evidence import fetch_forecasts
+
+    repo = args.repo or Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").decode().strip())
+    day = args.date or datetime.now(UTC).date()
+    hours = sorted(set(args.hours)) if args.hours else fetch_forecasts.RUN_HOURS
+    return fetch_forecasts.archive(day, hours, repo=repo, source=args.source)
 
 
 def verify(repo: Path, base: str) -> list[str]:

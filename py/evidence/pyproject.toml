@@ -6,7 +6,14 @@ authors = [
     { name = "Yashodhan Singh", email = "dsfx3d@gmail.com" }
 ]
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "cdsapi>=0.7.7",
+    "eccodes>=2.49.0",
+    # The ecCodes C library; eccodes' wheel metadata omits it on Linux/macOS.
+    "eccodeslib>=2.49.0.30 ; sys_platform != 'win32'",
+    "ecmwf-opendata>=0.3.34",
+    "numpy>=2.5.3",
+]
 
 [project.optional-dependencies]
 # Band map build (U3) fills this in.

@@ -16,3 +16,24 @@ The owner sets up a GitHub ruleset on `github.com/dsfx3d/khetru`
 
 `verify` also fails when a tag recorded in `tags.jsonl` no longer resolves to
 its recorded commit, so a moved tag is caught even without the ruleset.
+
+## Forecast inputs
+
+`inputs/ens-<source>-<YYYYMMDDHH>.json.gz` holds one ECMWF ENS run each
+(`source` is `opendata` or `tigge`): gzip-compressed canonical JSON with the
+control and every perturbed member kept apart, cumulative precipitation in mm at
+every native step from 0 to 360 h, on IMD 0.25° lattice cells covering the
+Mandi box plus one cell of margin, and the run's init time, model cycle, source
+URL and raw-GRIB SHA-256. Window totals are not stored; rebuild them with
+`khetru_evidence.forecasts.window_totals`. Files are write-once: `verify`
+fails if a committed one changes. The daily `evidence-archive` workflow saves
+the 00 and 12 UTC open-data runs from 1 Oct to 30 Nov.
+
+## Data attribution
+
+Forecast data: ECMWF, licensed under Creative Commons Attribution 4.0
+International (CC BY 4.0), https://creativecommons.org/licenses/by/4.0/.
+Open-data runs come from ECMWF open data (https://www.ecmwf.int/en/forecasts/datasets/open-data);
+hindcast runs from the TIGGE archive via the ECMWF Data Store, ECMWF fields only
+(CC BY 4.0). The files here are cropped and converted (metres or kg m-2 to mm,
+rounded to 0.001 mm); ECMWF does not endorse this use.
