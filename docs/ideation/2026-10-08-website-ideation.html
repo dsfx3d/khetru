@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ideation: khetru website</title>
+<style>
+  :root {
+    --bg: #fbfaf7; --fg: #1f2421; --muted: #5a625d; --line: #dcd8cf;
+    --card: #ffffff; --accent: #2f6b3a; --accent-soft: #e5efe3; --accent-text: #24522c;
+    --warn-soft: #f6ecdc; --warn-text: #6b4a12; --info-soft: #e6edf3; --info-text: #23415a;
+    --svg-bg: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161a17; --fg: #e6e9e4; --muted: #a5ada7; --line: #333a35;
+      --card: #1d221e; --accent: #7fbf87; --accent-soft: #23372a; --accent-text: #b5dfba;
+      --warn-soft: #3a2f1c; --warn-text: #ecd2a2; --info-soft: #1f2d3a; --info-text: #bcd3e6;
+      --svg-bg: #1d221e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 900px; margin-inline: auto; padding: 2.5rem 1.25rem 4rem; }
+  p, li, dd { max-width: 70ch; }
+  h1 { font-size: 1.9rem; line-height: 1.25; margin: 0.2rem 0 0.6rem; }
+  h2 { font-size: 1.4rem; margin: 2.6rem 0 0.8rem; padding-bottom: 0.3rem; border-bottom: 1px solid var(--line); }
+  h3 { font-size: 1.15rem; margin: 0 0 0.5rem; }
+  .eyebrow { font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .meta { display: flex; flex-wrap: wrap; gap: 0.4rem 1.4rem; margin: 0.4rem 0 1rem; padding: 0; color: var(--muted); font-size: 0.9rem; }
+  .meta dt { display: inline; font-weight: 600; color: var(--fg); }
+  .meta dd { display: inline; margin: 0 0 0 0.3rem; }
+  .meta div { white-space: nowrap; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.6rem; margin: 1.2rem 0; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.8rem; }
+  .stat b { display: block; font-size: 1.4rem; }
+  .stat span { font-size: 0.82rem; color: var(--muted); }
+  strong { color: inherit; }
+  code { font-size: 0.88em; background: var(--accent-soft); color: var(--accent-text); padding: 0.05em 0.3em; border-radius: 4px; }
+  ul.jump { list-style: none; padding: 0; margin: 0 0 1.4rem; columns: 2; column-gap: 1.5rem; }
+  ul.jump li { margin: 0.15rem 0; break-inside: avoid; }
+  a { color: var(--accent); }
+  article.idea { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1.2rem 1.3rem; margin: 0 0 1.3rem; }
+  .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.2rem 0 0.8rem; }
+  .chip { display: inline-block; font-size: 0.78rem; font-weight: 600; padding: 0.15rem 0.6rem; border-radius: 999px; border: 1px solid transparent; }
+  .chip.id { background: var(--accent); color: var(--bg); }
+  .chip.axis { background: var(--info-soft); color: var(--info-text); }
+  .chip.conf { background: var(--accent-soft); color: var(--accent-text); }
+  .chip.cx { background: var(--warn-soft); color: var(--warn-text); }
+  dl.fields { margin: 0; }
+  dl.fields dt { font-size: 0.75rem; letter-spacing: 0.07em; text-transform: uppercase; font-weight: 700; color: var(--muted); margin-top: 0.8rem; }
+  dl.fields dd { margin: 0.2rem 0 0; }
+  dl.fields dd ul { margin: 0.2rem 0; padding-left: 1.2rem; }
+  figure { margin: 1rem 0 0.4rem; }
+  figure svg { width: 100%; height: auto; display: block; background: var(--svg-bg); border: 1px solid var(--line); border-radius: 8px; }
+  figcaption { font-size: 0.82rem; color: var(--muted); margin-top: 0.35rem; }
+  svg text { font-family: ui-sans-serif, system-ui, sans-serif; fill: var(--fg); }
+  svg .box { fill: var(--card); stroke: var(--line); stroke-width: 1.5; }
+  svg .hi { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+  svg .warnbox { fill: var(--warn-soft); stroke: var(--line); stroke-width: 1.5; }
+  svg .arrow { stroke: var(--muted); stroke-width: 1.6; fill: none; }
+  svg .small { font-size: 11px; fill: var(--muted); }
+  svg .lbl { paint-order: stroke fill; stroke: var(--svg-bg); stroke-width: 3px; }
+  .callout { background: var(--info-soft); color: var(--info-text); border-radius: 8px; padding: 0.7rem 1rem; margin: 0 0 1.2rem; font-size: 0.92rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+  th, td { text-align: left; vertical-align: top; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--line); }
+  th { font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+  section ul { padding-left: 1.2rem; }
+  footer.composition-signal { margin-top: 3rem; padding-top: 0.8rem; border-top: 1px solid var(--line); font-size: 0.82rem; color: var(--muted); }
+  @media (max-width: 640px) { ul.jump { columns: 1; } }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <div class="eyebrow">Ideation</div>
+  <h1>Ideation: khetru website</h1>
+  <dl class="meta">
+    <div><dt>Date</dt><dd><time datetime="2026-10-08">2026-10-08</time></dd></div>
+    <div><dt>Topic</dt><dd>website</dd></div>
+    <div><dt>Focus</dt><dd>website (the proof of concept before the Android app)</dd></div>
+    <div><dt>Mode</dt><dd>repo-grounded</dd></div>
+  </dl>
+  <div class="stats">
+    <div class="stat"><b>44</b><span>raw ideas, 5 agents</span></div>
+    <div class="stat"><b>23</b><span>after dedupe and merging</span></div>
+    <div class="stat"><b>6</b><span>survivors</span></div>
+    <div class="stat"><b>5 / 5</b><span>axes covered</span></div>
+  </div>
+</header>
+
+<section id="grounding-context">
+  <h2>Grounding Context</h2>
+  <div class="eyebrow">Codebase Context</div>
+  <ul>
+    <li><strong>The repo has no code yet.</strong> It holds only <code>STRATEGY.md</code> and <code>.scratch/</code> notes: the handoff doc and two council transcripts.</li>
+    <li><strong>Role of the website.</strong> <code>STRATEGY.md:56</code>: "Website proof of concept, then an Android app as the farmer MVP; Hindi/Pahari voice and icons; low bandwidth; FPO and KVK channels." The handoff doc (<code>khetru.md</code>) still calls Stage 1 a full "responsive website" with farm mapping. The two docs conflict.</li>
+    <li><strong>Who will actually visit.</strong> The councils say web visitors will be agronomists, NGOs, developers and FPO staff, and that "low-literacy feature-phone farmers won't use a website first" (council-q1:25). Phones are "shared and read aloud by a son" (council-q4:45).</li>
+    <li><strong>What the website can prove.</strong> The website has "no stable identity", so metrics that need identity start with Android. "The PoC website sets baselines for metric 3 only" (council-q4:82). That is claim reliability, scored per altitude band. "plot-level calibration is fiction in the hills" (council-q4:70).</li>
+    <li><strong>Boundaries.</strong> No officer dashboards. KVK and FPO are channels only. No in-app decision prompts before 5000 farmers return. No claim the Evidence track can't verify. Don't make farmers work for khetru. No stored farm coordinates without consent.</li>
+    <li><strong>The crux.</strong> "If honest data can't beat the dealer on one decision, six more sources won't help" (council-q1:31). Also: "'Honest uncertainty' might mean 'we don't know' most of the time, so why return?" (council-q1:25).</li>
+  </ul>
+  <div class="eyebrow">External context (web research, moderate value)</div>
+  <ul>
+    <li><strong>Government apps.</strong> Kisan Suvidha, Meghdoot and mKisan are text-heavy and have no voice. They give regional weather but no decision for a specific field.</li>
+    <li><strong>Soil Health Card (SHC).</strong> Farmers don't adopt it because they don't understand or trust the card and it has no timing guidance. About 40% follow the dose (IDinsight; Gujarat AERC).</li>
+    <li><strong>IMD agromet advisories (GKMS).</strong> Block-level advisories go out Tue/Fri through KVK agromet units. In Himachal, the Nauni and Palampur agromet units reach about 5,000 farmers through 50 WhatsApp groups that Krishi Sakhis spread.</li>
+    <li><strong>Prior art.</strong> Digital Green's Farmer.Chat started with extension workers first and used voice. Kisan e-Mitra uses Bhashini for voice.</li>
+    <li><strong>Uncertainty research.</strong> Deterministic advice helps only when the forecast beats climatology. Framing like "in X of the last 10 years" draws on farmers' own memory.</li>
+  </ul>
+</section>
+
+<section id="topic-axes">
+  <h2>Topic Axes</h2>
+  <ol>
+    <li>Arrival &amp; channels: who arrives at the website and through whom</li>
+    <li>The one-field decision call: inputs, field location, data, the shape of the answer</li>
+    <li>Trust surface: sources, uncertainty, "can't tell", track record, privacy</li>
+    <li>Language, literacy &amp; bandwidth: Hindi/Pahari, voice, icons, shared phones, WhatsApp</li>
+    <li>What the PoC proves: Evidence and claim reliability, what carries into the Android app</li>
+  </ol>
+</section>
+
+<section id="ranked-ideas">
+  <h2>Ranked Ideas</h2>
+  <p class="callout">Every survivor's basis was checked by an independent verifier against the repo files. Generators verified their own bases on a read budget, so ideas from the agent that covered two frames got less verification per idea.</p>
+  <ul class="jump">
+    <li><a href="#i1">I1. Public claim ledger with a pass/fail season</a></li>
+    <li><a href="#i2">I2. Climatology-first call with a fixed verdict set</a></li>
+    <li><a href="#i3">I3. Band-level call permalinks</a></li>
+    <li><a href="#i4">I4. Voice-and-icon call card for Sakhi WhatsApp groups</a></li>
+    <li><a href="#i5">I5. "Challenge this call": agronomist review in public</a></li>
+    <li><a href="#i6">I6. SHC readback: does the card already answer it?</a></li>
+  </ul>
+
+  <article class="idea" id="i1">
+    <h3>I1. Public claim ledger with a pass/fail season</h3>
+    <div class="chips"><span class="chip id">I1</span><span class="chip axis">Axis 5 · What the PoC proves</span><span class="chip conf">Confidence 80%</span><span class="chip cx">Complexity Medium</span></div>
+    <dl class="fields">
+      <dt>Description</dt>
+      <dd>Each call the website makes is published before its window as a dated claim that can be proven wrong. Each claim records band, crop stage, verdict, confidence and expiry. Every week the claims are scored against IMD and satellite observations, and an honest "can't tell" counts as a scored outcome. Each claim is scored against two baselines the farmer already has for free: climatology and the IMD/GKMS block advisory. The site states its pass/fail rule in public before the season starts, for example: "if our band-level sow/spray calls don't beat the crop calendar by end of rabi 2027, we say so here." A backtest on past seasons, clearly labelled as hindcast, means the ledger doesn't open at zero. Each call card links to its ledger entry and shows the band's record for that decision type.</dd>
+      <dt>Basis</dt>
+      <dd><ul>
+        <li><code>direct:</code> "Claim reliability - share of khetru's falsifiable claims that held, scored so stated uncertainty and honest 'can't tell' count; weekly, server-side against public observations per altitude band, no user data." (<code>STRATEGY.md:32</code>)</li>
+        <li><code>direct:</code> "it is where 'backed by results' comes from, and it gates the chat assistant and any new data domains." (<code>STRATEGY.md:52</code>)</li>
+        <li><code>direct:</code> "The PoC website sets baselines for metric 3 only." (council-q4:82)</li>
+        <li><code>external:</code> GKMS block advisories are the incumbent free baseline. "Skill over climatology" is how weather services verify forecasts (NWS). Clinical AI runs a "shadow mode" before go-live.</li>
+      </ul></dd>
+      <dt>Rationale</dt>
+      <dd>Five generators, working independently, converged on this idea. It is the one thing the website can honestly prove given who visits it. The output is the asset everything else waits on: the chat assistant, new data domains, the "backed by results" claim, and a go/no-go for the Android app. Agronomist and NGO visitors are exactly the gatekeepers who need a visible record before they pass khetru on.</dd>
+      <dt>Downsides</dt>
+      <dd>It needs a scoring rule for GKMS's free-text advisories. Early in the season the record is thin, so the site needs an honest "too early to tell" state. A public miss rate can hurt adoption before it builds trust. The backtest must never be presented as a live record.</dd>
+    </dl>
+    <figure>
+      <svg viewBox="0 0 760 170" role="img" aria-label="Claim loop: call published, frozen, scored against observation and two baselines, record shown on next call">
+        <defs><marker id="ah1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8a918c"/></marker></defs>
+        <rect class="hi" x="20" y="50" width="150" height="60" rx="8"/>
+        <text x="95" y="76" text-anchor="middle" font-size="13" font-weight="600">Call published</text>
+        <text x="95" y="94" text-anchor="middle" class="small">band · crop · verdict · expiry</text>
+        <rect class="box" x="220" y="50" width="150" height="60" rx="8"/>
+        <text x="295" y="76" text-anchor="middle" font-size="13" font-weight="600">Window passes</text>
+        <text x="295" y="94" text-anchor="middle" class="small">IMD + satellite observe</text>
+        <rect class="box" x="420" y="20" width="150" height="40" rx="8"/>
+        <text x="495" y="45" text-anchor="middle" font-size="12">vs climatology</text>
+        <rect class="box" x="420" y="100" width="150" height="40" rx="8"/>
+        <text x="495" y="125" text-anchor="middle" font-size="12">vs GKMS advisory</text>
+        <rect class="hi" x="610" y="50" width="130" height="60" rx="8"/>
+        <text x="675" y="76" text-anchor="middle" font-size="13" font-weight="600">Public record</text>
+        <text x="675" y="94" text-anchor="middle" class="small">held · missed · can't tell</text>
+        <line class="arrow" x1="170" y1="80" x2="216" y2="80" marker-end="url(#ah1)"/>
+        <line class="arrow" x1="370" y1="72" x2="416" y2="45" marker-end="url(#ah1)"/>
+        <line class="arrow" x1="370" y1="88" x2="416" y2="117" marker-end="url(#ah1)"/>
+        <line class="arrow" x1="570" y1="45" x2="606" y2="70" marker-end="url(#ah1)"/>
+        <line class="arrow" x1="570" y1="117" x2="606" y2="92" marker-end="url(#ah1)"/>
+        <path class="arrow" d="M675,112 C675,160 95,160 95,114" marker-end="url(#ah1)"/>
+        <text x="385" y="160" text-anchor="middle" class="small lbl">record shown beside the next call</text>
+      </svg>
+      <figcaption>Illustrative. Each call becomes a scored claim, and the record feeds back into the next call card.</figcaption>
+    </figure>
+  </article>
+
+  <article class="idea" id="i2">
+    <h3>I2. Climatology-first call with a fixed verdict set</h3>
+    <div class="chips"><span class="chip id">I2</span><span class="chip axis">Axis 3 · Trust surface</span><span class="chip conf">Confidence 75%</span><span class="chip cx">Complexity Medium</span></div>
+    <dl class="fields">
+      <dt>Description</dt>
+      <dd>By default the page shows what the farmer can check against their own memory: "In 7 of the last 10 years, rain came within 3 days of this date in your band." khetru gives a sharper call only for bands and decisions where its forecast has been shown to beat that baseline. Every call ends on one of a small fixed set of verdicts: <em>Do it · Wait · Same as your Soil Health Card · Can't tell</em>. "Can't tell" always comes with a reason, such as "station too far" or "card too old". Every number carries a source chip: lab-measured (dated), satellite estimate, or forecast.</dd>
+      <dt>Basis</dt>
+      <dd><ul>
+        <li><code>direct:</code> "'Honest uncertainty' might mean 'we don't know' most of the time, so why return?" (council-q1:25)</li>
+        <li><code>direct:</code> "Risk: khetru may just repeat the SHC." (council-q4:27). "'Wait, don't spray yet' is a decision, so inaction must count." (council-q4:67)</li>
+        <li><code>direct:</code> "Satellite estimates must be clearly distinguished from direct field measurements." (<code>khetru.md:211</code>)</li>
+        <li><code>external:</code> Smallholder-forecast research says deterministic advice helps only when the forecast beats climatology, and that framing anchored in farmers' memory works. Prescrire, the ad-free drug bulletin that competes with pharma reps, routinely publishes "nothing new" verdicts.</li>
+      </ul></dd>
+      <dt>Rationale</dt>
+      <dd>This turns the two worries the councils raised into features. Saying "can't tell" becomes useful, because the farmer still gets a baseline they can check themselves. Saying "same as your card" becomes a trust-building verdict, not a failure. A fixed verdict set also gives the I1 ledger a finite set of outcomes to score. No doc specifies the output format yet, so this is the decision to make.</dd>
+      <dt>Downsides</dt>
+      <dd>It needs 10+ years of station or reanalysis history per band, and Himachal data is sparse. In weeks where khetru shows no skill, the site will say "the calendar is as good as we are", which is honest but hard to sell. Wording the verdicts in Hindi and Pahari needs the planned farmer test.</dd>
+    </dl>
+    <figure>
+      <svg viewBox="0 0 760 180" role="img" aria-label="Decision: does forecast beat climatology for this band? If yes, sharper call; if no, baseline plus can't tell">
+        <defs><marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8a918c"/></marker></defs>
+        <rect class="box" x="20" y="65" width="160" height="50" rx="8"/>
+        <text x="100" y="86" text-anchor="middle" font-size="12" font-weight="600">Band baseline</text>
+        <text x="100" y="103" text-anchor="middle" class="small">"7 of last 10 years…"</text>
+        <polygon class="box" points="330,40 420,90 330,140 240,90"/>
+        <text x="330" y="86" text-anchor="middle" font-size="12">beats</text>
+        <text x="330" y="101" text-anchor="middle" font-size="12">climatology?</text>
+        <rect class="hi" x="500" y="20" width="240" height="50" rx="8"/>
+        <text x="620" y="41" text-anchor="middle" font-size="12" font-weight="600">Sharper call</text>
+        <text x="620" y="58" text-anchor="middle" class="small">Do it · Wait · Same as your card</text>
+        <rect class="warnbox" x="500" y="110" width="240" height="50" rx="8"/>
+        <text x="620" y="131" text-anchor="middle" font-size="12" font-weight="600">Can't tell + reason</text>
+        <text x="620" y="148" text-anchor="middle" class="small">baseline stays on screen</text>
+        <line class="arrow" x1="180" y1="90" x2="236" y2="90" marker-end="url(#ah2)"/>
+        <line class="arrow" x1="390" y1="73" x2="496" y2="45" marker-end="url(#ah2)"/>
+        <line class="arrow" x1="390" y1="107" x2="496" y2="135" marker-end="url(#ah2)"/>
+        <text x="445" y="50" text-anchor="middle" class="small lbl">yes</text>
+        <text x="445" y="134" text-anchor="middle" class="small lbl">no</text>
+      </svg>
+      <figcaption>Illustrative. The baseline is always shown, and khetru speaks more sharply only where it has earned it.</figcaption>
+    </figure>
+  </article>
+
+  <article class="idea" id="i3">
+    <h3>I3. Band-level call permalinks: precomputed, static, no coordinates</h3>
+    <div class="chips"><span class="chip id">I3</span><span class="chip axis">Axis 2 · The one-field decision call</span><span class="chip conf">Confidence 70%</span><span class="chip cx">Complexity Medium</span></div>
+    <dl class="fields">
+      <dt>Description</dt>
+      <dd>Drop GPS pins and boundary drawing from the website. The farmer (or whoever holds the phone) picks a village, which resolves to an altitude band, then a crop. The page shows only the one money-at-risk decision currently live for that band, or says that no decision is live. A scheduled job precomputes every band × crop × stage × week cell as a static page, e.g. <code>/kangra/900-1200/wheat/sow/2026-w42</code>. Each URL is a frozen, timestamped claim with an expiry. The same URL is the page, the forwardable card (I4) and the ledger entry (I1). There is no login, no session and no per-visitor compute.</dd>
+      <dt>Basis</dt>
+      <dd><ul>
+        <li><code>direct:</code> "Calibrate per altitude band and reward an honest 'can't tell', because plot-level calibration is fiction in the hills." (council-q4:70)</li>
+        <li><code>direct:</code> "In sparse hill districts, crop + timing + district can re-identify a farmer." (council-q4:73). "no stored farm coordinates or cross-season linking without consent." (<code>STRATEGY.md:38</code>)</li>
+        <li><code>direct:</code> "Metrics 1 and 4 start only with the Android app because the website has no stable identity." (council-q4:30). "Drops if khetru becomes browsing." (council-q4:36)</li>
+        <li><code>external:</code> Mountain avalanche bulletins give coarse regional data per elevation band, not per slope, and ask nothing of the reader.</li>
+      </ul></dd>
+      <dt>Rationale</dt>
+      <dd>The unit the call is made for, the unit the Evidence track scores, and the unit privacy protects all become one cell. Privacy then holds by construction, not by policy. It is cheap and fast on 2G, fits a tiny OSS team, and every page can be forwarded. It also settles the conflict between the farm-mapping Stage 1 in <code>khetru.md</code> and the PoC framing in STRATEGY.</dd>
+      <dt>Downsides</dt>
+      <dd>Answers are coarser than a plot-level view, a trade the councils accept. A band × crop × stage grid can grow large. Aspect (sunny or shady slope) was dropped because the Evidence track can't calibrate it at band level. The village-to-band mapping must handle villages that span bands.</dd>
+    </dl>
+    <figure>
+      <svg viewBox="0 0 760 170" role="img" aria-label="One frozen URL fans out to page, forwardable card, and ledger entry">
+        <defs><marker id="ah3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8a918c"/></marker></defs>
+        <rect class="box" x="20" y="60" width="170" height="50" rx="8"/>
+        <text x="105" y="81" text-anchor="middle" font-size="12" font-weight="600">Weekly job</text>
+        <text x="105" y="98" text-anchor="middle" class="small">band × crop × stage</text>
+        <rect class="hi" x="240" y="55" width="250" height="60" rx="8"/>
+        <text x="365" y="80" text-anchor="middle" font-size="12" font-weight="600">Frozen call URL</text>
+        <text x="365" y="98" text-anchor="middle" class="small">/kangra/900-1200/wheat/sow/w42</text>
+        <rect class="box" x="560" y="10" width="180" height="40" rx="8"/>
+        <text x="650" y="35" text-anchor="middle" font-size="12">Page (one decision)</text>
+        <rect class="box" x="560" y="65" width="180" height="40" rx="8"/>
+        <text x="650" y="90" text-anchor="middle" font-size="12">Forwardable card (I4)</text>
+        <rect class="box" x="560" y="120" width="180" height="40" rx="8"/>
+        <text x="650" y="145" text-anchor="middle" font-size="12">Ledger entry (I1)</text>
+        <line class="arrow" x1="190" y1="85" x2="236" y2="85" marker-end="url(#ah3)"/>
+        <line class="arrow" x1="490" y1="72" x2="556" y2="32" marker-end="url(#ah3)"/>
+        <line class="arrow" x1="490" y1="85" x2="556" y2="85" marker-end="url(#ah3)"/>
+        <line class="arrow" x1="490" y1="98" x2="556" y2="138" marker-end="url(#ah3)"/>
+      </svg>
+      <figcaption>Illustrative. One precomputed cell feeds three uses, with no per-visitor state.</figcaption>
+    </figure>
+  </article>
+
+  <article class="idea" id="i4">
+    <h3>I4. Voice-and-icon call card for Sakhi WhatsApp groups</h3>
+    <div class="chips"><span class="chip id">I4</span><span class="chip axis">Axis 4 · Language, literacy &amp; bandwidth</span><span class="chip conf">Confidence 55%</span><span class="chip cx">Complexity Medium</span></div>
+    <dl class="fields">
+      <dt>Description</dt>
+      <dd>Treat the website's main farmer-facing output as a card, not a visit. Each call (I3) renders as an image with a large verdict icon plus a 20-second Hindi/Pahari voice note. The script is written to be read or played aloud to someone else, for example by a son to an elder or by a Krishi Sakhi to a group. The card is sized for the WhatsApp groups Himachal's agromet units already reach through Sakhis. Scope is one district and one crop. The intermediary only forwards the card: no dashboard, no login, no farmer data.</dd>
+      <dt>Basis</dt>
+      <dd><ul>
+        <li><code>direct:</code> "low-literacy feature-phone farmers won't use a website first. The web-first path fits agronomists, FPO staff and educated landowners" (council-q1:25)</li>
+        <li><code>direct:</code> "phones are shared and read aloud by a son, so device ID isn't the farmer"; "text prompts fail low-literacy users, so use voice or icons in Hindi/Pahari" (council-q4:45)</li>
+        <li><code>direct:</code> "KVKs and FPOs as channels for spreading the word only." (<code>STRATEGY.md:23</code>). "scope must be one district and one crop" (council-q1:42)</li>
+        <li><code>external:</code> The Nauni and Palampur agromet units reach about 5,000 farmers through 50 WhatsApp groups spread by Krishi Sakhis (Tribune, HP). Digital Green's Farmer.Chat started with extension workers.</li>
+      </ul></dd>
+      <dt>Rationale</dt>
+      <dd>This answers the councils' open question of how a small OSS team reaches farmers at all. It uses a trusted face-to-face network that already exists and stays inside the "channels only" boundary. The voice script is the concrete content spec behind STRATEGY's vague "Hindi/Pahari voice and icons", and the Android app's notifications can reuse it later.</dd>
+      <dt>Downsides</dt>
+      <dd>It depends on one Sakhi network agreeing to forward. That is a partnership the team hasn't secured. The audio needs a real Pahari voice, and TTS quality there is unproven. Cards forwarded after their expiry spread stale advice, so the expiry must be shown on the card itself. And because of peer spread, one bad call damages the channel ("dies with bad results", council-q4:33).</dd>
+    </dl>
+    <figure>
+      <svg viewBox="0 0 760 120" role="img" aria-label="Website generates card, Sakhi forwards to WhatsApp group, read aloud to farmer">
+        <defs><marker id="ah4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8a918c"/></marker></defs>
+        <rect class="box" x="20" y="35" width="150" height="50" rx="8"/>
+        <text x="95" y="65" text-anchor="middle" font-size="12" font-weight="600">Website</text>
+        <rect class="hi" x="210" y="35" width="150" height="50" rx="8"/>
+        <text x="285" y="56" text-anchor="middle" font-size="12" font-weight="600">Card</text>
+        <text x="285" y="73" text-anchor="middle" class="small">icon + 20s voice</text>
+        <rect class="box" x="400" y="35" width="150" height="50" rx="8"/>
+        <text x="475" y="56" text-anchor="middle" font-size="12" font-weight="600">Krishi Sakhi</text>
+        <text x="475" y="73" text-anchor="middle" class="small">WhatsApp group</text>
+        <rect class="box" x="590" y="35" width="150" height="50" rx="8"/>
+        <text x="665" y="56" text-anchor="middle" font-size="12" font-weight="600">Farmer</text>
+        <text x="665" y="73" text-anchor="middle" class="small">heard, not read</text>
+        <line class="arrow" x1="170" y1="60" x2="206" y2="60" marker-end="url(#ah4)"/>
+        <line class="arrow" x1="360" y1="60" x2="396" y2="60" marker-end="url(#ah4)"/>
+        <line class="arrow" x1="550" y1="60" x2="586" y2="60" marker-end="url(#ah4)"/>
+      </svg>
+      <figcaption>Illustrative. The farmer never has to open the website.</figcaption>
+    </figure>
+  </article>
+
+  <article class="idea" id="i5">
+    <h3>I5. "Challenge this call": agronomist review in public</h3>
+    <div class="chips"><span class="chip id">I5</span><span class="chip axis">Axis 1 · Arrival &amp; channels</span><span class="chip conf">Confidence 60%</span><span class="chip cx">Complexity Low</span></div>
+    <dl class="fields">
+      <dt>Description</dt>
+      <dd>Give the visitors who actually show up (agronomists, KVK scientists, NGO staff) a job. Every call page links to its rule, inputs and sources, plus a "challenge this call" path that opens a public GitHub issue. Challenges and their resolutions show on the call. A call reviewed against a published review standard can show "reviewed by N agronomists". Reviewer input is kept separate from any farmer baseline.</dd>
+      <dt>Basis</dt>
+      <dd><ul>
+        <li><code>direct:</code> "advice farmers act on needs KVK or agronomist validation for credibility and liability, which OSS contributors can't provide" (council-q1:42)</li>
+        <li><code>direct:</code> "Website PoC visitors are agronomists, NGOs and developers, so don't baseline on them." (council-q4:27)</li>
+        <li><code>direct:</code> The project "should welcome contributions from developers, designers, translators, researchers, agronomists, and farmers." (<code>khetru.md:118</code>)</li>
+      </ul></dd>
+      <dt>Rationale</dt>
+      <dd>It turns the "wrong audience" problem into the credibility supply the project lacks, without building an officer dashboard. Running it on GitHub keeps it consistent with the open-source positioning, and it costs almost nothing to build.</dd>
+      <dt>Downsides</dt>
+      <dd>A "reviewed" badge is itself an endorsement claim, so it needs a defined standard or it becomes one more unverifiable claim. GitHub is a barrier for KVK scientists who don't use it. Review volume may be near zero without outreach.</dd>
+    </dl>
+  </article>
+
+  <article class="idea" id="i6">
+    <h3>I6. SHC readback: does the card already answer it?</h3>
+    <div class="chips"><span class="chip id">I6</span><span class="chip axis">Axis 2 · The one-field decision call</span><span class="chip conf">Confidence 45%</span><span class="chip cx">Complexity Medium</span></div>
+    <dl class="fields">
+      <dt>Description</dt>
+      <dd>Build the planned week-one extraction of 20 SHC reports from one district as an open parser and a labelled dataset. On the website, show what a typical card in that district implies for one crop: "how many bags of what, and when". Where the card already prints a crop-wise dose, flag it and use the "Same as your card" verdict (I2) instead of a khetru claim. It is entered by card number or typed values. No on-device OCR in the PoC.</dd>
+      <dt>Basis</dt>
+      <dd><ul>
+        <li><code>direct:</code> "Farmers hold a 12-parameter lab report but buy fertilizer on the dealer's or a neighbour's word, because the card doesn't turn into 'how many bags of what, for this crop, plot and season.'" (council-q1:22)</li>
+        <li><code>direct:</code> "pull 20 SHC reports from one district and interview 15 card holders and 2 dealers." (council-q1:47). "Risk: khetru may just repeat the SHC." (council-q4:27)</li>
+        <li><code>external:</code> IDinsight's SHC diagnostic: farmers don't understand or trust the card, it carries no timing guidance, and the study recommends a redesigned card.</li>
+      </ul></dd>
+      <dt>Rationale</dt>
+      <dd>The fertilizer decision is where the councils say khetru must beat the dealer or is "done". This is the cheapest falsification test: either khetru adds something beyond the card, or the honest answer is "same as your card". The parser and dataset are public goods that fit the open-platform track.</dd>
+      <dt>Downsides</dt>
+      <dd>Turning lab values into a dose is a claim the Evidence track can't verify from public observations, which strains the STRATEGY boundary. Cards are old and grid-sampled. Typing values in is work for the farmer. The result may well be that khetru adds nothing here. That is a valuable finding but not a feature.</dd>
+    </dl>
+  </article>
+</section>
+
+<section id="rejection-summary">
+  <h2>Rejection Summary</h2>
+  <table>
+    <thead><tr><th>#</th><th>Idea</th><th>Reason Rejected</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>Dealer second opinion (farmer types what the dealer advised; khetru agrees or differs)</td><td>Asks farmers to do work for khetru on a site with no identity. A "differs, here's why" verdict on named products is hard to verify and carries harm risk. Contested follow is a post-5000 metric. Better explored as a brainstorm variant of I2.</td></tr>
+      <tr><td>2</td><td>Dealer audit with a fixed verdict set (combined idea)</td><td>Inherits the problems of #1. The verdict-set half survives in I2.</td></tr>
+      <tr><td>3</td><td>Village noticeboard sheet per band (tide-table analogy)</td><td>Needs Sakhi/FPO labour to print and post, and the channel is unvalidated. Fails the meeting test next to I4.</td></tr>
+      <tr><td>4</td><td>Relay / read-aloud / Sakhi "counter-detailing" mode</td><td>Duplicates a stronger idea. The read-aloud script and the Sakhi delivery are folded into I4.</td></tr>
+      <tr><td>5</td><td>Slope aspect (sunny/shady) as a location input</td><td>A new input the Evidence track can't calibrate at band level. The band part survives in I3.</td></tr>
+      <tr><td>6</td><td>Call object as an open, CAP-shaped schema</td><td>Premature before any consumer exists. The dormant-plugin clause covers data domains, not output formats. Its useful fields (expiry, falsifiable test, source type) are folded into I1 and I3.</td></tr>
+      <tr><td>7</td><td>On-device SHC photo OCR</td><td>Too expensive on low-end Android for the likely value. Cut down to I6's typed or card-number readback.</td></tr>
+      <tr><td>8</td><td>Pre-rendered Hindi/Pahari audio and icon vocabulary pack</td><td>Already implied by <code>STRATEGY.md:56</code>. The cited pre-build test (council-q4:85) is about the decision prompt, not a vocabulary. Audio is folded into I4.</td></tr>
+      <tr><td>9</td><td>Intermediary pilot kit with QR card and a "who told you" tap</td><td>The "who told you" question belongs to Android onboarding (council-q4:33), and asking it is work for the farmer. The one-district, one-crop scope is folded into I4.</td></tr>
+      <tr><td>10</td><td>SMS-160 / 14 KB hard budget per call</td><td>Basis refuted by verification. Hindi SMS is Unicode, so the limit is about 70 characters, not 160, and 14 KB is arbitrary. It's a constraint to set in planning, not a direction.</td></tr>
+      <tr><td>11</td><td>One farmer, one season public diary</td><td>Re-identification risk in sparse hill districts (council-q4:73). It exposes the farmer and asks them for work.</td></tr>
+      <tr><td>12</td><td>Open JSON/RSS feed for agromet units and Farmer.Chat</td><td>Drifts toward serving officers and a chat surface before claim reliability is proven (<code>STRATEGY.md:23-24</code>). Revisit after I1 has a record.</td></tr>
+      <tr><td>13</td><td>Source-type chip on every number</td><td>Already a stated requirement (<code>khetru.md:211, 424, 427</code>). Kept as a rendering detail of I2.</td></tr>
+      <tr><td>14</td><td>Zero-input "one live decision in your band"; precomputed static grid; claim permalink</td><td>Duplicates. Merged into I3.</td></tr>
+      <tr><td>15</td><td>Shadow season vs baselines; public kill criterion; analog-year framing; verdict scale</td><td>Duplicates. Merged into I1 and I2.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer class="composition-signal">Composed 2026-10-08T08:43Z by ce-ideate from the prompt "website", grounded in <code>STRATEGY.md</code> and <code>.scratch/</code> notes of <a href="https://github.com/dsfx3d/khetru">dsfx3d/khetru</a>.</footer>
+</main>
+</body>
+</html>
