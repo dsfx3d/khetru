@@ -54,7 +54,6 @@ TIGGE_PERTURBED = forecasts.ENS_PERTURBED
 ARCHIVE_BOX = forecasts.MANDI_BOX
 TIGGE_DATASET = "tigge-forecasts"
 TIGGE_URL = "https://ecds.ecmwf.int/api"
-OPENDATA_SOURCES = ("ecmwf", "aws", "azure", "google")
 RUN_HOURS = (0, 12)
 ARCHIVE_SEASON = ((10, 1), (11, 30))  # inclusive (month, day)
 
@@ -86,7 +85,7 @@ def is_protected(init: datetime) -> bool:
 
 
 def guard(init: datetime, repo: Path) -> None:
-    """Refuse a protected run unless a bundle tag exists and its ``started`` run is on origin.
+    """Refuse a protected run unless a bundle tag and its ``started`` run are on origin.
 
     Fails closed: any git problem counts as "not unlocked".
     """
@@ -96,17 +95,21 @@ def guard(init: datetime, repo: Path) -> None:
         return
     raise ProtectedDateError(
         f"refusing {init:%Y-%m-%dT%HZ}: pre-{PROTECTED_BEFORE_YEAR} Oct–Nov forecasts stay closed "
-        f"until a {BUNDLE_TAG_PATTERN} tag exists and its hindcast started run is on origin (KTD11)"
+        f"until a {BUNDLE_TAG_PATTERN} tag and its hindcast started run are on origin (KTD11)"
     )
 
 
 def _unlocked(repo: Path) -> bool:
+    """Whether origin advertises a bundle tag whose started run sits on an origin branch.
+
+    The branch holding the run must also contain the tagged commit.
+    """
     try:
-        tags = _git(repo, "tag", "--list", BUNDLE_TAG_PATTERN).split()
+        tags = _origin_bundle_tags(repo)
         refs = _git(repo, "for-each-ref", "--format=%(refname)", "refs/remotes/origin/").split()
     except subprocess.CalledProcessError:
         return False
-    for tag in tags:
+    for tag, commit in tags.items():
         bundle = tag.removeprefix(f"{LEDGER}/bundle-")
         runs = f"ledger/{LEDGER}/hindcast/{bundle}/runs.jsonl"
         for ref in refs:
@@ -114,15 +117,43 @@ def _unlocked(repo: Path) -> bool:
                 text = _git(repo, "show", f"{ref}:{runs}")
             except subprocess.CalledProcessError:
                 continue
-            for line in text.splitlines():
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if (isinstance(entry, dict) and entry.get("type") == "run"
-                        and entry.get("status") == "started" and entry.get("bundle") == bundle):
-                    return True
+            if _has_started_run(text, bundle) and _is_ancestor(repo, commit, ref):
+                return True
     return False
+
+
+def _origin_bundle_tags(repo: Path) -> dict[str, str]:
+    """Bundle tags on origin mapped to the commit each one points at (annotated tags peeled)."""
+    listing = _git(repo, "ls-remote", "--tags", "origin", f"refs/tags/{BUNDLE_TAG_PATTERN}")
+    tags: dict[str, str] = {}
+    for line in listing.splitlines():
+        sha, ref = line.split("\t")
+        name = ref.removeprefix("refs/tags/")
+        if name.endswith("^{}"):
+            tags[name.removesuffix("^{}")] = sha  # peeled commit wins over the tag object
+        else:
+            tags.setdefault(name, sha)
+    return tags
+
+
+def _has_started_run(text: str, bundle: str) -> bool:
+    for line in text.splitlines():
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if (isinstance(entry, dict) and entry.get("type") == "run"
+                and entry.get("status") == "started" and entry.get("bundle") == bundle):
+            return True
+    return False
+
+
+def _is_ancestor(repo: Path, commit: str, ref: str) -> bool:
+    try:
+        _git(repo, "merge-base", "--is-ancestor", commit, ref)
+    except subprocess.CalledProcessError:
+        return False
+    return True
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -159,9 +190,7 @@ def _field(h, path: Path) -> Field:
         raise forecasts.RecordError(f"{path}: unexpected data type {data_type}")
     init = datetime.strptime(f"{get(h, 'dataDate'):08d}{get(h, 'dataTime'):04d}", "%Y%m%d%H%M")
     ni, nj = get(h, "Ni"), get(h, "Nj")
-    # Per-point coordinates in scan order, so rows and columns need no flipping.
-    lats = eccodes.codes_get_array(h, "latitudes").reshape(nj, ni)[:, 0]
-    lons = eccodes.codes_get_array(h, "longitudes").reshape(nj, ni)[0, :]
+    lats, lons = _grid_axes(h, ni, nj)
     values = eccodes.codes_get_values(h).reshape(nj, ni)
     if get(h, "stepUnits") != 1:
         raise forecasts.RecordError(f"{path}: step units are not hours")
@@ -176,6 +205,26 @@ def _field(h, path: Path) -> Field:
         values=np.asarray(values, dtype=float),
         process_id=int(get(h, "generatingProcessIdentifier")),
     )
+
+
+_GRID_KEYS = (
+    "latitudeOfFirstGridPointInDegrees", "longitudeOfFirstGridPointInDegrees",
+    "iDirectionIncrementInDegrees", "jDirectionIncrementInDegrees", "jScansPositively",
+)
+_grid_axes_cache: dict[tuple, tuple] = {}
+
+
+def _grid_axes(h, ni: int, nj: int):
+    """Latitude and longitude axes of a regular grid, decoded once per geometry.
+
+    Per-point coordinates come in scan order, so rows and columns need no flipping.
+    """
+    key = (ni, nj, *(eccodes.codes_get(h, k) for k in _GRID_KEYS))
+    if key not in _grid_axes_cache:
+        lats = eccodes.codes_get_array(h, "latitudes").reshape(nj, ni)[:, 0]
+        lons = eccodes.codes_get_array(h, "longitudes").reshape(nj, ni)[0, :]
+        _grid_axes_cache[key] = (lats, lons)
+    return _grid_axes_cache[key]
 
 
 def _model_cycle(fields: list[Field]) -> str:
@@ -215,7 +264,9 @@ def fetch_opendata(init: datetime, *, repo: Path, cache_dir: Path, source: str =
             try:
                 client.retrieve(date=f"{init:%Y%m%d}", time=init.hour, stream=stream, type=type_,
                                 param="tp", step=step, target=str(target))
-                digest.update(target.read_bytes())
+                with open(target, "rb") as f:
+                    for chunk in iter(lambda: f.read(1 << 20), b""):
+                        digest.update(chunk)
                 fields += [forecasts.crop(f, box) for f in decode_grib(target)]
             except forecasts.RecordError:
                 raise
@@ -300,7 +351,8 @@ def in_archive_season(day: date) -> bool:
 def archive(day: date, hours=RUN_HOURS, *, repo: Path, source: str = "ecmwf") -> int:
     """Save each open-data run of ``day`` not yet in the ledger. Returns an exit status.
 
-    Init times already saved are skipped before any download. A run that fails
+    Init times already saved are skipped before any download; a saved file that
+    does not decode is reported and left alone (write-once). A run that fails
     (missing step, network error) is reported on stderr and makes the status 1;
     the other runs are still archived.
     """
@@ -315,6 +367,12 @@ def archive(day: date, hours=RUN_HOURS, *, repo: Path, source: str = "ecmwf") ->
         label = f"{init:%Y-%m-%dT%H:%M:%SZ}"
         rel = forecasts.record_path("opendata", init)
         if (root / rel).exists():
+            try:
+                forecasts.decode_record((root / rel).read_bytes())
+            except forecasts.RecordError as e:  # write-once: report, never overwrite
+                print(f"evidence archive: {label} saved as {rel} is unreadable: {e}", file=sys.stderr)
+                status = 1
+                continue
             print(f"evidence archive: {label} already saved as {rel}; skipped")
             continue
         try:

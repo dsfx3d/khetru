@@ -235,6 +235,34 @@ def test_a_different_record_for_a_saved_init_is_refused(tmp_path):
     assert (root / rel).read_bytes() == before
 
 
+def test_a_write_that_fails_midway_leaves_no_file(tmp_path, monkeypatch):
+    record = record_from_grib(tmp_path, ens_messages())
+    root = tmp_path / "ledger" / "mandi-wheat"
+
+    class DiskFull:
+        def __init__(self, f):
+            self.f = f
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            self.f.close()
+
+        def write(self, data):
+            self.f.write(data[: len(data) // 2])
+            raise OSError(28, "No space left on device")
+
+        def __getattr__(self, name):
+            return getattr(self.f, name)
+
+    monkeypatch.setattr(fc, "open", lambda *a, **k: DiskFull(open(*a, **k)), raising=False)
+    with pytest.raises(OSError, match="No space"):
+        fc.write_record(root, record)
+
+    assert list((root / "inputs").iterdir()) == []
+
+
 # --- the shared date guard ---------------------------------------------------
 
 
@@ -320,26 +348,98 @@ def test_run_whose_steps_reach_into_pre_2026_oct_is_refused(repo, tmp_path, no_n
     ff.guard(datetime(2026, 10, 15, tzinfo=UTC), repo)  # rabi 2026 development data: allowed
 
 
-def test_guard_opens_only_with_bundle_tag_and_started_run_on_origin(repo, tmp_path):
-    protected = datetime(2023, 10, 23, tzinfo=UTC)
+PROTECTED = datetime(2023, 10, 23, tzinfo=UTC)
+TAG = "mandi-wheat/bundle-v1"
+
+
+def add_origin(repo, tmp_path):
     origin = tmp_path / "origin.git"
     git(tmp_path, "init", "-q", "--bare", str(origin))
     git(repo, "remote", "add", "origin", str(origin))
 
-    git(repo, "tag", "-a", "mandi-wheat/bundle-v1", "-m", "bundle v1")
-    with pytest.raises(ff.ProtectedDateError):  # tag alone is not enough
-        ff.guard(protected, repo)
 
+def record_run(repo, rel="hindcast/v1/runs.jsonl", **run):
     clock = lambda: datetime(2027, 8, 1, tzinfo=UTC)  # noqa: E731
     lg = L.Ledger(repo / "ledger" / "mandi-wheat", clock=clock)
-    lg.append("hindcast/v1/runs.jsonl", L.run(ledger="mandi-wheat", bundle="v1", seq=1, status="started"))
+    lg.append(rel, L.run(ledger="mandi-wheat", **{"bundle": "v1", "seq": 1, "status": "started", **run}))
     git(repo, "add", "-A")
-    git(repo, "commit", "-q", "-m", "start run")
+    git(repo, "commit", "-q", "-m", "record run")
+
+
+def test_guard_opens_only_with_bundle_tag_and_started_run_on_origin(repo, tmp_path):
+    add_origin(repo, tmp_path)
+
+    git(repo, "tag", "-a", TAG, "-m", "bundle v1")
+    with pytest.raises(ff.ProtectedDateError):  # tag alone is not enough
+        ff.guard(PROTECTED, repo)
+
+    record_run(repo)
     with pytest.raises(ff.ProtectedDateError):  # started, but not on origin yet
-        ff.guard(protected, repo)
+        ff.guard(PROTECTED, repo)
 
     git(repo, "push", "-q", "origin", "main")
-    ff.guard(protected, repo)
+    with pytest.raises(ff.ProtectedDateError):  # run on origin, but the tag is local only
+        ff.guard(PROTECTED, repo)
+
+    git(repo, "push", "-q", "origin", TAG)
+    ff.guard(PROTECTED, repo)
+
+
+def test_guard_refuses_when_origin_branch_lacks_the_tagged_commit(repo, tmp_path):
+    add_origin(repo, tmp_path)
+    record_run(repo)
+    git(repo, "push", "-q", "origin", "main")
+    git(repo, "commit", "-q", "--allow-empty", "-m", "bundle")
+    git(repo, "tag", "-a", TAG, "-m", "bundle v1")  # tag is ahead of the pushed run
+    git(repo, "push", "-q", "origin", TAG)
+    with pytest.raises(ff.ProtectedDateError):
+        ff.guard(PROTECTED, repo)
+
+
+def test_guard_refuses_without_a_remote(repo):
+    git(repo, "tag", "-a", TAG, "-m", "bundle v1")
+    record_run(repo)
+    with pytest.raises(ff.ProtectedDateError):
+        ff.guard(PROTECTED, repo)
+
+
+@pytest.mark.parametrize("rel, run", [
+    ("hindcast/v1/runs.jsonl", dict(status="aborted")),
+    ("hindcast/v1/runs.jsonl", dict(status="recorded")),
+    ("hindcast/v2/runs.jsonl", dict(bundle="v2")),
+], ids=["aborted", "recorded", "other-bundle"])
+def test_guard_needs_a_started_run_of_the_tagged_bundle(repo, tmp_path, rel, run):
+    add_origin(repo, tmp_path)
+    git(repo, "tag", "-a", TAG, "-m", "bundle v1")
+    record_run(repo, rel, **run)
+    git(repo, "push", "-q", "origin", "main", TAG)
+    with pytest.raises(ff.ProtectedDateError):
+        ff.guard(PROTECTED, repo)
+
+
+def test_guard_ignores_another_bundles_run_misfiled_under_the_tagged_bundle(repo, tmp_path):
+    add_origin(repo, tmp_path)
+    git(repo, "tag", "-a", TAG, "-m", "bundle v1")
+    entry = {**L.run(ledger="mandi-wheat", bundle="v2", seq=1, status="started"),
+             "recorded_at": "2027-08-01T00:00:00Z"}
+    path = repo / "ledger" / "mandi-wheat" / "hindcast" / "v1" / "runs.jsonl"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(L.encode(entry))
+    git(repo, "add", "-A")
+    git(repo, "commit", "-q", "-m", "misfiled run")
+    git(repo, "push", "-q", "origin", "main", TAG)
+    with pytest.raises(ff.ProtectedDateError):
+        ff.guard(PROTECTED, repo)
+
+
+def test_november_is_protected(repo):
+    with pytest.raises(ff.ProtectedDateError):
+        ff.guard(datetime(2023, 11, 20, tzinfo=UTC), repo)
+
+
+def test_protection_starts_with_the_first_run_whose_last_step_reaches_october():
+    assert ff.is_protected(datetime(2025, 9, 16, tzinfo=UTC))  # +360 h = 1 Oct 00Z
+    assert not ff.is_protected(datetime(2025, 9, 15, tzinfo=UTC))  # +360 h = 30 Sep 00Z
 
 
 # --- archiving ---------------------------------------------------------------
@@ -385,6 +485,19 @@ def test_archive_records_a_missing_step_as_failure(repo, tmp_path, monkeypatch, 
     assert cli.main(argv) == 1
     assert "2026-10-08T00:00:00Z" in capsys.readouterr().err
     assert not (repo / "ledger" / "mandi-wheat" / "inputs").exists()
+
+
+def test_archive_reports_an_unreadable_saved_record_and_leaves_it(repo, no_network, small_run, capsys):
+    _, opendata = no_network
+    path = repo / "ledger" / "mandi-wheat" / fc.record_path("opendata", INIT)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"\x1f\x8b truncated")
+    argv = ["archive", "--date", "2026-10-08", "--time", "0", "--repo", str(repo)]
+
+    assert cli.main(argv) == 1
+    assert "2026-10-08T00:00:00Z" in capsys.readouterr().err
+    assert path.read_bytes() == b"\x1f\x8b truncated"
+    assert opendata.requests == []
 
 
 def test_archive_skips_days_outside_1_oct_to_30_nov(repo, no_network, small_run, capsys):

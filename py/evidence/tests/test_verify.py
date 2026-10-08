@@ -236,3 +236,75 @@ def test_fails_on_recorded_tag_that_was_deleted(repo, base, capsys):
 
     assert code == 1
     assert "mandi-wheat/bundle-v1" in out.err and "does not resolve" in out.err
+
+
+def test_fails_on_stamped_prefix_edited_then_extended(repo, base, capsys):
+    lg = ledger_of(repo)
+    lg.append("claims/exploratory.jsonl", claim(date(2026, 11, 2)))
+    manifest = lg.write_manifest()
+    old = lines(repo)
+    write_lines(repo, [*old[:2], old[2].replace(b"0.4", b"0.5")])  # same length, not in base
+    lg.append("claims/exploratory.jsonl", claim(date(2026, 11, 9)))
+
+    code, out = verify(repo, base, capsys)
+
+    assert code == 1
+    assert f"ledger/mandi-wheat/{manifest}: {CLAIMS} does not extend" in out.err
+
+
+def test_fails_when_file_in_stamped_manifest_is_missing(repo, base, capsys):
+    lg = ledger_of(repo)
+    lg.append("claims/live.jsonl", claim(date(2026, 11, 2), kind="live", bundle="v1"))
+    manifest = lg.write_manifest()
+    (lg.root / "claims/live.jsonl").unlink()
+
+    code, out = verify(repo, base, capsys)
+
+    assert code == 1
+    assert f"ledger/mandi-wheat/{manifest}: ledger/mandi-wheat/claims/live.jsonl is missing" in out.err
+
+
+def test_fails_on_hindcast_claim_filed_under_another_run(repo, base, capsys):
+    lg = ledger_of(repo)
+    for seq in (1, 2):
+        lg.append("hindcast/v1/runs.jsonl", L.run(ledger="mandi-wheat", bundle="v1", seq=seq, status="started"))
+    entry = {
+        **claim(date(2026, 10, 19), kind="hindcast", bundle="v1", run_id="v1-run-2"),
+        "recorded_at": "2026-10-19T10:30:00Z",
+    }
+    misfiled = "ledger/mandi-wheat/hindcast/v1/v1-run-1/claims.jsonl"
+    (repo / misfiled).parent.mkdir(parents=True)
+    write_lines(repo, [L.encode(entry)], rel=misfiled)
+
+    code, out = verify(repo, base, capsys)
+
+    assert code == 1
+    assert f"{misfiled}:1:" in out.err and "v1-run-2" in out.err
+
+
+@pytest.fixture
+def stamped(repo, base):
+    ledger_of(repo).write_manifest()
+    return commit_all(repo, "stamp")
+
+
+def test_fails_on_edited_committed_manifest(repo, stamped, capsys):
+    path = next((repo / "ledger/mandi-wheat/manifests").iterdir())
+    manifest = json.loads(path.read_bytes())
+    manifest["files"] = {}
+    path.write_bytes(L.encode(manifest))
+
+    code, out = verify(repo, stamped, capsys)
+
+    assert code == 1
+    assert "manifests/" in out.err and "write-once" in out.err
+
+
+def test_fails_on_deleted_committed_manifest(repo, stamped, capsys):
+    path = next((repo / "ledger/mandi-wheat/manifests").iterdir())
+    path.unlink()
+
+    code, out = verify(repo, stamped, capsys)
+
+    assert code == 1
+    assert "manifests/" in out.err and "missing" in out.err

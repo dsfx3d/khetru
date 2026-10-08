@@ -24,7 +24,9 @@ Values are rounded to 0.001 mm; GRIB packing error is far below that.
 import gzip
 import json
 import math
+import os
 import re
+import tempfile
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -310,18 +312,27 @@ def write_record(ledger_root: Path, record: dict) -> tuple[str, bool]:
     """Save ``record`` write-once; returns (relative path, whether a file was written).
 
     Saving an identical record again is a no-op. A different record for a saved
-    init is refused and the file is left untouched.
+    init is refused and the file is left untouched. The bytes go to a temporary
+    sibling first and are linked into place once complete, so a failed write
+    never leaves a partial file at the final path.
     """
     data = encode_record(record)
     rel = record_path(record["source"], record_init(record))
     path = Path(ledger_root) / rel
-    if path.exists():
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with open(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.link(tmp, path)
+    except FileExistsError:
         if path.read_bytes() == data:
             return rel, False
         raise RecordError(f"{rel} already exists with different content; inputs are write-once")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "xb") as f:
-        f.write(data)
+    finally:
+        os.unlink(tmp)
     return rel, True
 
 
@@ -349,5 +360,6 @@ def window_totals(record: dict, start_step: int, end_step: int) -> np.ndarray:
         raise RecordError(f"steps {start_step}-{end_step} h are not a window of this record")
     i, j = steps.index(start_step), steps.index(end_step)
     series = [record["control"], *(record["perturbed"][k] for k in member_labels(record)[1:])]
-    stacked = np.asarray(series, dtype=float)
-    return stacked[:, j] - stacked[:, i]
+    end = np.asarray([member[j] for member in series], dtype=float)
+    start = np.asarray([member[i] for member in series], dtype=float)
+    return end - start

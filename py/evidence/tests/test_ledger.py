@@ -174,6 +174,38 @@ def test_manifest_records_length_and_sha256_of_every_ledger_file(lg):
         lg.write_manifest()
 
 
+TS = "2026-10-19T10:30:00Z"
+SHA = "0" * 40
+
+
+@pytest.mark.parametrize("rel, entry, message", [
+    (CLAIMS, claim(ledger="other"), "belongs to ledger 'other'"),
+    (SCORES, L.score(ledger="mandi-wheat", claim_id="c", kind="exploratory", bundle="dev",
+                     vintage="v", outcome="maybe"), "outcome must be one of"),
+    ("tags.jsonl", L.tag(ledger="mandi-wheat", name="t", commit="abc"), "full 40-hex SHA"),
+    (CLAIMS, {**claim(), "recorded_at": "2026-10-19"}, "recorded_at must be UTC"),
+    (CLAIMS, claim(issue_date="2026-13-40"), "issue_date must be an ISO date"),
+    ("hindcast/v1/runs.jsonl", L.run(ledger="mandi-wheat", bundle="v1", seq=0, status="started"),
+     "seq must be a positive integer"),
+    ("hindcast/v1/runs.jsonl", L.run(ledger="mandi-wheat", bundle="v1", seq=True, status="started"),
+     "seq must be a positive integer"),
+    ("hindcast/v1/runs.jsonl", L.run(ledger="mandi-wheat", bundle="v1", seq=1, status="paused"),
+     "run status must be one of"),
+    ("hindcast/v2/runs.jsonl", L.run(ledger="mandi-wheat", bundle="v1", seq=1, status="started"),
+     "only holds bundle v2 entries"),
+    ("claims/foo.jsonl", claim(), "not a recognised ledger file"),
+], ids=["ledger", "outcome", "tag-commit", "recorded-at", "issue-date", "seq-0", "seq-bool",
+        "run-status", "run-bundle", "stray-file"])
+def test_check_file_rejects(lg, rel, entry, message):
+    path = lg.root / rel
+    path.parent.mkdir(parents=True)
+    path.write_bytes(L.encode({"recorded_at": TS, **entry}))
+
+    problems = lg.check_file(rel)
+
+    assert any(message in m for _, m in problems), problems
+
+
 def _key():
     return dict(
         ledger="mandi-wheat", kind="exploratory", bundle="dev", band="district",

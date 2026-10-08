@@ -183,7 +183,7 @@ def correction(*, ledger, target_id, kind, bundle, seq, action, reason,
         "seq": seq,
         "action": action,
         "reason": reason,
-        "id": f"{target_id}#{seq}",
+        "id": correction_id(target_id, seq),
     }
     if action == "fix":
         entry["field"] = field
@@ -204,12 +204,24 @@ def run(*, ledger, bundle, seq, status, **payload) -> dict:
         "seq": seq,
         "run_id": rid,
         "status": status,
-        "id": f"{rid}:{status}",
+        "id": run_status_id(bundle, seq, status),
     }
 
 
 def tag(*, ledger, name, commit) -> dict:
-    return {"type": "tag", "ledger": ledger, "name": name, "commit": commit, "id": f"tag:{name}"}
+    return {"type": "tag", "ledger": ledger, "name": name, "commit": commit, "id": tag_id(name)}
+
+
+def correction_id(target_id: str, seq: int) -> str:
+    return f"{target_id}#{seq}"
+
+
+def run_status_id(bundle: str, seq: int, status: str) -> str:
+    return f"{run_id(bundle, seq)}:{status}"
+
+
+def tag_id(name: str) -> str:
+    return f"tag:{name}"
 
 
 def _expected_id(e: dict) -> str:
@@ -219,11 +231,11 @@ def _expected_id(e: dict) -> str:
         case "score":
             return score_id(e["claim_id"], e["vintage"])
         case "correction":
-            return f"{e['target_id']}#{e['seq']}"
+            return correction_id(e["target_id"], e["seq"])
         case "run":
-            return f"{run_id(e['bundle'], e['seq'])}:{e['status']}"
+            return run_status_id(e["bundle"], e["seq"], e["status"])
         case "tag":
-            return f"tag:{e['name']}"
+            return tag_id(e["name"])
 
 
 # --- schema ---------------------------------------------------------------
@@ -294,6 +306,7 @@ class _FileRule:
     kind: str | None = None
     bundle: str | None = None
     runs_file: str | None = None  # hindcast entries must name a run started here
+    run_id: str | None = None  # the run directory a hindcast entry must belong to
 
 
 def _file_rule(rel: str) -> _FileRule | None:
@@ -305,10 +318,10 @@ def _file_rule(rel: str) -> _FileRule | None:
             return _FileRule(("score",), kind=name.removesuffix(".jsonl"))
         case ("hindcast", bundle, "runs.jsonl"):
             return _FileRule(("run",), kind="hindcast", bundle=bundle)
-        case ("hindcast", bundle, _, "claims.jsonl" | "scores.jsonl" as name):
+        case ("hindcast", bundle, run, "claims.jsonl" | "scores.jsonl" as name):
             types = claims if name == "claims.jsonl" else ("score",)
             runs = f"hindcast/{bundle}/runs.jsonl"
-            return _FileRule(types, kind="hindcast", bundle=bundle, runs_file=runs)
+            return _FileRule(types, kind="hindcast", bundle=bundle, runs_file=runs, run_id=run)
         case ("tags.jsonl",):
             return _FileRule(("tag",))
     return None
@@ -352,6 +365,8 @@ class _FileState:
             raise LedgerError(f"{rel} only holds {rule.kind} entries, not {e['kind']}")
         if rule.bundle and e["bundle"] != rule.bundle:
             raise LedgerError(f"{rel} only holds bundle {rule.bundle} entries, not {e['bundle']}")
+        if rule.run_id and e["run_id"] != rule.run_id:
+            raise LedgerError(f"{rel} only holds run {rule.run_id} entries, not {e['run_id']}")
         if rule.runs_file and e["run_id"] not in self._started_runs():
             raise LedgerError(f"run {e['run_id']} has no started entry in {rule.runs_file}")
 

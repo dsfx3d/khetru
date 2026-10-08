@@ -6,7 +6,7 @@ import sys
 from datetime import UTC, date, datetime
 from pathlib import Path, PurePosixPath
 
-from khetru_evidence.ledger import WRITE_ONCE_DIRS, Ledger
+from khetru_evidence.ledger import MANIFEST_DIR, WRITE_ONCE_DIRS, Ledger
 
 LEDGERS_DIR = "ledger"
 
@@ -43,9 +43,13 @@ def main(argv: list[str] | None = None) -> int:
     return args.run(args)
 
 
+def _repo_root(args: argparse.Namespace) -> Path:
+    return args.repo or Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").decode().strip())
+
+
 def _run_verify(args: argparse.Namespace) -> int:
     try:
-        repo = args.repo or Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").decode().strip())
+        repo = _repo_root(args)
         problems = verify(repo, args.base)
     except subprocess.CalledProcessError as e:
         command = " ".join(e.cmd)
@@ -63,7 +67,7 @@ def _run_verify(args: argparse.Namespace) -> int:
 def _run_archive(args: argparse.Namespace) -> int:
     from khetru_evidence import fetch_forecasts
 
-    repo = args.repo or Path(_git(Path.cwd(), "rev-parse", "--show-toplevel").decode().strip())
+    repo = _repo_root(args)
     day = args.date or datetime.now(UTC).date()
     hours = sorted(set(args.hours)) if args.hours else fetch_forecasts.RUN_HOURS
     return fetch_forecasts.archive(day, hours, repo=repo, source=args.source)
@@ -81,14 +85,14 @@ def verify(repo: Path, base: str) -> list[str]:
 
 
 def _check_against_base(repo: Path, base: str) -> list[str]:
-    """JSONL files must extend their base bytes; write-once evidence must be unchanged."""
+    """JSONL files must extend their base bytes; write-once evidence and manifests must be unchanged."""
     listing = _git(repo, "ls-tree", "-r", "-z", "--name-only", base, "--", LEDGERS_DIR)
     problems = []
     for name in filter(None, listing.decode().split("\0")):
         parts = PurePosixPath(name).parts
         if len(parts) < 3:
             continue
-        write_once = parts[2] in WRITE_ONCE_DIRS
+        write_once = parts[2] in (*WRITE_ONCE_DIRS, MANIFEST_DIR)
         if not write_once and not name.endswith(".jsonl"):
             continue
         current = repo / name
