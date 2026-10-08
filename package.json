@@ -7,7 +7,9 @@
   },
   "scripts": {
     "build": "pnpm -r --if-present build",
-    "test": "pnpm -r --if-present test",
+    "test": "pnpm test:ts && pnpm test:py",
+    "test:ts": "pnpm -r --if-present test",
+    "test:py": "uv run --all-packages pytest; s=$?; [ $s -eq 0 ] || [ $s -eq 5 ]",
     "lint": "pnpm -r --if-present lint"
   }
 }

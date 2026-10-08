@@ -4,10 +4,11 @@ Free, open-source farming companion for Indian smallholders. See [STRATEGY.md](S
 
 ## Layout
 
-Polyglot monorepo. pnpm workspaces drive every package; Python packages are also uv workspace members.
+Polyglot monorepo: TypeScript via pnpm workspaces, Python via uv workspaces.
 
-- `apps/` — deployable things (website, jobs)
-- `packages/` — shared libraries
+- `apps/` — TypeScript apps (website)
+- `packages/` — TypeScript libraries
+- `py/` — Python packages (uv workspace members)
 
 ## Setup
 
@@ -16,10 +17,10 @@ Requires Node 24+, pnpm 10, Python 3.13+, [uv](https://docs.astral.sh/uv/).
 ```sh
 pnpm install
 uv sync
-pnpm test   # runs `test` in every package that defines it
+pnpm test   # TS package tests, then pytest across py/*
 ```
 
 ## Adding a package
 
 - **TypeScript:** create `apps/<name>/` or `packages/<name>/` with a `package.json`.
-- **Python:** create the directory with a `pyproject.toml`, add its path to `members` in the root `pyproject.toml`, and add a `package.json` whose scripts call `uv run …` so `pnpm -r` reaches it.
+- **Python:** create `py/<name>/` with a `pyproject.toml` (`uv init --package py/<name>`); tests go in `py/<name>/tests/`.

@@ -3,9 +3,14 @@ name = "khetru"
 version = "0.0.0"
 requires-python = ">=3.13"
 
+[dependency-groups]
+dev = ["pytest"]
+
 [tool.uv]
 package = false
 
 [tool.uv.workspace]
-# List each Python package explicitly; TS packages share apps/ and packages/.
-members = []
+members = ["py/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["py"]
