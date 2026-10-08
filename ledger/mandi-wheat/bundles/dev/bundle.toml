@@ -1,0 +1,26 @@
+# Development bundle: untagged, so every entry made under it is `exploratory`.
+# Values are the KTD3 defaults; U8 copies the tested values into bundles/v1/.
+
+[bundle]
+name = "dev"
+
+[semantics]
+# Issue dates: every Monday from season_start to season_end inclusive (MM-DD).
+issue_weekday = "monday"
+season_start = "10-15"
+season_end = "11-15"
+
+# Each claim uses the issue date's run at this UTC hour; the run counts as
+# available run_available_after_hours later.
+run_hour_utc = 0
+run_available_after_hours = 9
+
+# Forecast window, in steps from the run's init time.
+forecast_step_start_hours = 24
+forecast_step_end_hours = 192
+
+# Observed window: rain_days IMD rain-days, each starting at rain_day_start_hour_utc,
+# beginning with the first such boundary after the run is available. The 3 h
+# offset against the forecast window is documented, not corrected.
+rain_day_start_hour_utc = 3
+rain_days = 7

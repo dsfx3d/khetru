@@ -5,3 +5,6 @@ dist/
 .venv/
 __pycache__/
 *.pyc
+
+# Raw GRIB downloads; only Mandi-box extracts are committed under ledger/.
+.cache/evidence/

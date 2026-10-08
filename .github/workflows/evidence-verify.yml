@@ -1,0 +1,50 @@
+name: evidence-verify
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # verify reads the base ref's ledger files and resolves recorded tags.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: astral-sh/setup-uv@v6
+
+      - run: pnpm install --frozen-lockfile
+      - run: uv sync --all-packages --locked
+
+      - run: pnpm test
+
+      - name: Pick the base ref
+        id: base
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            base="$PR_BASE"
+          elif [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then
+            base="$BEFORE"
+          else
+            # New branch: compare against where it left main; with no shared
+            # history, against the empty tree (every file is still validated).
+            base=$(git merge-base origin/main HEAD 2>/dev/null || git hash-object -t tree /dev/null)
+          fi
+          echo "ref=$base" >> "$GITHUB_OUTPUT"
+
+      - run: uv run --all-packages evidence verify --base "${{ steps.base.outputs.ref }}"

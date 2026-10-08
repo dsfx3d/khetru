@@ -1,0 +1,20 @@
+[project]
+name = "khetru-evidence"
+version = "0.1.0"
+description = "Mandi wheat claim ledger: archive, claims, scoring and verify"
+authors = [
+    { name = "Yashodhan Singh", email = "dsfx3d@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = []
+
+[project.optional-dependencies]
+# Band map build (U3) fills this in.
+geo = []
+
+[project.scripts]
+evidence = "khetru_evidence.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.8.14,<0.9.0"]
+build-backend = "uv_build"
