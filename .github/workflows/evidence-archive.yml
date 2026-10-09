@@ -1,7 +1,8 @@
 name: evidence-archive
 
 # Saves ECMWF open-data ENS runs for Mandi as write-once inputs (U5, KTD2).
-# The portal keeps only a few days, so every missed day is lost for good.
+# The ECMWF portal keeps only a few days; missed days can be backfilled from
+# the AWS mirror by dispatching with a list of dates and source=aws.
 on:
   schedule:
     # 22:00 UTC daily in Oct and Nov: today's 00 and 12 UTC runs are complete
@@ -10,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       date:
-        description: "Run date YYYY-MM-DD (default: today and yesterday, UTC)"
+        description: "Run dates YYYY-MM-DD, comma-separated; one job per date and run hour (default: today and yesterday, UTC)"
         required: false
         default: ""
       source:
@@ -29,13 +30,38 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      runs: ${{ steps.runs.outputs.runs }}
+    steps:
+      - id: runs
+        env:
+          DATES: ${{ inputs.date }}
+        run: |
+          # No dates: one job with the default (today and yesterday, both runs).
+          # Dates: one job per date and run hour, so each fits the job timeout.
+          runs=$(jq -cn --arg d "$DATES" '
+            ($d | split(",") | map(gsub("\\s"; "")) | map(select(length > 0))) as $ds
+            | if ($ds | length) == 0 then [{date: "", time: ""}]
+              else [$ds[] as $x | (0, 12) as $h | {date: $x, time: ($h | tostring)}] end')
+          echo "runs=$runs" >> "$GITHUB_OUTPUT"
+
   archive:
+    needs: plan
     runs-on: ubuntu-latest
     # A full run is ~85 steps x 51 members of tp, about 3.5 GB of GRIB ranges.
     timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      # Jobs push to one branch; the reset-and-redo loop below absorbs the races.
+      max-parallel: 4
+      matrix:
+        run: ${{ fromJSON(needs.plan.outputs.runs) }}
     env:
       SOURCE: ${{ inputs.source || 'ecmwf' }}
-      DATE: ${{ inputs.date }}
+      DATE: ${{ matrix.run.date }}
+      TIME: ${{ matrix.run.time }}
       BRANCH: ${{ github.ref_name }}
       INPUTS: ledger/mandi-wheat/inputs
       PENDING: .cache/evidence/pending
@@ -60,7 +86,7 @@ jobs:
           # Idempotent: init times already saved are skipped before any download.
           archive() {
             if [ -n "$DATE" ]; then
-              evidence archive --date "$DATE" --source "$SOURCE" || status=1
+              evidence archive --date "$DATE" --time "$TIME" --source "$SOURCE" || status=1
             else
               # Yesterday too, so one failed day is retried while the portal still has it.
               evidence archive --date "$(date -u -d yesterday +%F)" --source "$SOURCE" || status=1
