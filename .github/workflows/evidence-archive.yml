@@ -1,0 +1,114 @@
+name: evidence-archive
+
+# Saves ECMWF open-data ENS runs for Mandi as write-once inputs (U5, KTD2).
+# The portal keeps only a few days, so every missed day is lost for good.
+on:
+  schedule:
+    # 22:00 UTC daily in Oct and Nov: today's 00 and 12 UTC runs are complete
+    # by then. `evidence archive` itself skips days outside 1 Oct-30 Nov.
+    - cron: "0 22 * 10,11 *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Run date YYYY-MM-DD (default: today and yesterday, UTC)"
+        required: false
+        default: ""
+      source:
+        description: "Open-data mirror"
+        required: false
+        default: ecmwf
+        type: choice
+        options: [ecmwf, aws, azure, google]
+
+permissions:
+  contents: write
+
+# Single writer (KTD12): shared with the weekly job; never cancels a run in progress.
+concurrency:
+  group: evidence-writer
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    # A full run is ~85 steps x 51 members of tp, about 3.5 GB of GRIB ranges.
+    timeout-minutes: 300
+    env:
+      SOURCE: ${{ inputs.source || 'ecmwf' }}
+      DATE: ${{ inputs.date }}
+      BRANCH: ${{ github.ref_name }}
+      INPUTS: ledger/mandi-wheat/inputs
+      PENDING: .cache/evidence/pending
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --all-packages --locked
+
+      - name: Archive, verify, commit and push
+        run: |
+          set -u
+          git config user.name "github-actions[bot]"
+          git config user.email "41898099+github-actions[bot]@users.noreply.github.com"
+
+          status=0
+          evidence() { uv run --all-packages evidence "$@"; }
+
+          # Idempotent: init times already saved are skipped before any download.
+          archive() {
+            if [ -n "$DATE" ]; then
+              evidence archive --date "$DATE" --source "$SOURCE" || status=1
+            else
+              # Yesterday too, so one failed day is retried while the portal still has it.
+              evidence archive --date "$(date -u -d yesterday +%F)" --source "$SOURCE" || status=1
+              evidence archive --source "$SOURCE" || status=1
+            fi
+          }
+
+          # Commits only new inputs files; returns 1 when there is nothing to commit.
+          commit_inputs() {
+            evidence verify --base HEAD || exit 1
+            git add -- "$INPUTS" 2>/dev/null || true
+            git diff --cached --quiet && return 1
+            git commit -q -m "Archive ECMWF open-data ENS runs for Mandi"
+          }
+
+          archive
+          if ! commit_inputs; then
+            echo "nothing new to commit"
+            exit $status
+          fi
+
+          # Bounded reset-and-redo on a rejected push (KTD12): drop the local
+          # commit, move to the new remote head and redo the idempotent archive
+          # step there. The just-made records are kept in the ignored cache so the
+          # redo does not download them again. JSONL is never rebased or merged.
+          for attempt in 1 2 3 4 5; do
+            if git push origin "HEAD:refs/heads/$BRANCH"; then
+              exit $status
+            fi
+            echo "push rejected (attempt $attempt); resetting onto the new remote head"
+            rm -rf "$PENDING" && mkdir -p "$PENDING"
+            git diff-tree --no-commit-id --name-only -r --diff-filter=A HEAD -- "$INPUTS" \
+              | while read -r f; do mkdir -p "$PENDING/$(dirname "$f")"; cp "$f" "$PENDING/$f"; done
+            git fetch origin "$BRANCH"
+            git reset --hard FETCH_HEAD
+            (cd "$PENDING" && find . -type f) | while read -r f; do
+              if [ -e "$f" ]; then
+                cmp -s "$PENDING/$f" "$f" || { echo "$f differs on the remote; write-once conflict"; exit 1; }
+              else
+                mkdir -p "$(dirname "$f")"; cp "$PENDING/$f" "$f"
+              fi
+            done || exit 1
+            archive
+            if ! commit_inputs; then
+              echo "remote already holds every new record"
+              exit $status
+            fi
+            sleep $((attempt * 10))
+          done
+          echo "push still rejected after 5 attempts" >&2
+          exit 1
