@@ -1,0 +1,15 @@
+lat,lon,district_km2,weight,verdict_band,reason
+31.25,76.75,0.139,0.000035,district,no-independent-gauges
+31.25,77.00,190.058,0.048064,district,no-independent-gauges
+31.25,77.25,278.201,0.070355,district,no-independent-gauges
+31.25,77.50,2.705,0.000684,district,no-independent-gauges
+31.50,76.75,246.477,0.062332,district,no-independent-gauges
+31.50,77.00,656.063,0.165913,district,no-independent-gauges
+31.50,77.25,541.553,0.136954,district,no-independent-gauges
+31.50,77.50,5.398,0.001365,district,no-independent-gauges
+31.75,76.50,0.332,0.000084,district,no-independent-gauges
+31.75,76.75,554.982,0.140351,district,no-independent-gauges
+31.75,77.00,628.253,0.158880,district,no-independent-gauges
+31.75,77.25,258.138,0.065281,district,no-independent-gauges
+32.00,76.75,356.850,0.090245,district,no-independent-gauges
+32.00,77.00,235.107,0.059457,district,no-independent-gauges

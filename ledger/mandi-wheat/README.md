@@ -29,6 +29,18 @@ URL and raw-GRIB SHA-256. Window totals are not stored; rebuild them with
 fails if a committed one changes. The daily `evidence-archive` workflow saves
 the 00 and 12 UTC open-data runs from 1 Oct to 30 Nov.
 
+## Band map
+
+`bands/band-map.csv` lists every IMD 0.25° lattice cell holding part of Mandi
+district: the cell's share of the district's area (`weight`) and the verdict
+band it reports to. There is one verdict band, `district`, because no
+independent gauges stand behind separate bands (R17). Elevation zones are not
+registered; `docs/findings/2026-10-mandi-elevation-zones.md` says why. `khetru_evidence.bands.band_mean` turns a forecast or
+observed field into the band value with these weights and one coverage rule.
+`bands/PROVENANCE.md` names the sources, their hashes and the method;
+`uv run --all-packages evidence bands build` (needs `uv sync --all-extras`)
+rebuilds the map and fails unless it matches the committed file byte for byte.
+
 ## Data attribution
 
 Forecast data: ECMWF, licensed under Creative Commons Attribution 4.0
@@ -37,3 +49,9 @@ Open-data runs come from ECMWF open data (https://www.ecmwf.int/en/forecasts/dat
 hindcast runs from the TIGGE archive via the ECMWF Data Store, ECMWF fields only
 (CC BY 4.0). The files here are cropped and converted (metres or kg m-2 to mm,
 rounded to 0.001 mm); ECMWF does not endorse this use.
+
+District boundary: geoBoundaries gbOpen India ADM2 (https://www.geoboundaries.org),
+Open Database License 1.0. Elevation: Copernicus DEM GLO-30, produced using
+Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH
+2014-2018, provided under COPERNICUS by the European Union and ESA; all rights
+reserved.
