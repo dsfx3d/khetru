@@ -1,7 +1,7 @@
 # Mandi power simulation: the procedure, written before the run
 
 - **Date:** 2026-10-11
-- **Status:** Draft for the owner. The simulation has not been run on the IMD files.
+- **Status:** Accepted by the owner with the merge of PR #10 on 2026-10-10. First run on the IMD files on 2026-10-10 from commit `2ebd930`; its output is `ledger/mandi-wheat/power.md`.
 - **Plan unit:** U8 step 2 in `docs/plans/2026-10-08-1554-feat-mandi-wheat-claim-ledger-plan.md`
 
 ## Purpose
