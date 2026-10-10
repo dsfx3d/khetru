@@ -279,7 +279,8 @@ def band_mean(band_map: BandMap, verdict_band: str, lats: Sequence[float], lons:
     """Area-weighted mean of ``field`` over a verdict band's cells.
 
     ``field`` has shape (..., len(lats), len(lons)); the mean is taken over the
-    last two axes. A cell counts as covered when it is on the grid and its value
+    last two axes. ``lats`` and ``lons`` are cell centres on the IMD lattice, in
+    any order. A cell counts as covered when it is on the grid and its value
     is finite. The mean uses the covered cells only, and is NaN wherever they
     hold less than ``coverage_share`` of the band's weight.
     """
@@ -289,8 +290,13 @@ def band_mean(band_map: BandMap, verdict_band: str, lats: Sequence[float], lons:
     values = np.asarray(field, dtype=float)
     if values.shape[-2:] != (len(lats), len(lons)):
         raise BandMapError(f"field shape {values.shape} does not end in the grid's shape")
+    for x in (*lats, *lons):
+        if not math.isfinite(x) or abs(x / LATTICE - round(x / LATTICE)) > 1e-9:
+            raise BandMapError(f"grid coordinate {x} is off the IMD {LATTICE}° lattice")
     row = {round(lat / LATTICE): i for i, lat in enumerate(lats)}
     col = {round(lon / LATTICE): j for j, lon in enumerate(lons)}
+    if len(row) != len(lats) or len(col) != len(lons):
+        raise BandMapError("grid coordinates must be distinct")
     weights = np.zeros((len(lats), len(lons)))
     total = off_grid = 0.0
     for c in cells:

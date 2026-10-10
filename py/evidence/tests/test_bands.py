@@ -277,6 +277,25 @@ def test_band_mean_refuses_an_unknown_band_or_a_misshapen_field(uneven):
         B.band_mean(uneven, B.DISTRICT, LATS, LONS, np.zeros((2, 3)), 1.0)
 
 
+def test_band_mean_refuses_a_grid_off_the_lattice_or_with_repeated_cells(uneven):
+    tenth = [31.2, 31.3, 31.4]
+    with pytest.raises(B.BandMapError, match="off the IMD"):
+        B.band_mean(uneven, B.DISTRICT, tenth, LONS, field(1, 1, 1), 1.0)
+    with pytest.raises(B.BandMapError, match="off the IMD"):
+        B.band_mean(uneven, B.DISTRICT, LATS, [76.75, 77.1, 77.25], field(1, 1, 1), 1.0)
+    with pytest.raises(B.BandMapError, match="off the IMD"):
+        B.band_mean(uneven, B.DISTRICT, LATS, [76.75, float("nan"), 77.25], field(1, 1, 1), 1.0)
+    with pytest.raises(B.BandMapError, match="distinct"):
+        B.band_mean(uneven, B.DISTRICT, LATS, [76.75, 77.0, 77.0], field(1, 1, 1), 1.0)
+
+
+def test_band_mean_takes_the_grid_in_any_order(uneven):
+    ordered = B.band_mean(uneven, B.DISTRICT, LATS, LONS, field(10, 20, 40), 1.0)
+    reversed_ = B.band_mean(uneven, B.DISTRICT, LATS, LONS[::-1], field(10, 20, 40)[:, ::-1], 1.0)
+
+    assert reversed_.values == ordered.values
+
+
 # --- building from source files (needs the geo extra) ------------------------
 
 
@@ -384,3 +403,20 @@ def test_committed_band_map_is_valid_and_district_wide():
 
     assert band_map.verdict_bands == (B.DISTRICT,)
     assert band_map.reason == B.NO_INDEPENDENT_GAUGES
+
+
+def test_committed_band_map_is_the_one_provenance_records():
+    import hashlib
+    import re
+    from pathlib import Path
+
+    path = Path(__file__).parents[3] / "ledger" / "mandi-wheat" / B.BAND_MAP_PATH
+    data = path.read_bytes()
+    provenance = path.with_name("PROVENANCE.md").read_text(encoding="utf-8")
+    recorded = re.search(r"`band-map\.csv` SHA-256: `([0-9a-f]{64})`", provenance)
+
+    assert recorded and hashlib.sha256(data).hexdigest() == recorded[1]
+    cells = B.decode(data).cells
+    assert len(cells) == 14
+    assert sum(c.district_km2 for c in cells) == pytest.approx(3954.3, abs=0.05)
+    assert sum(c.weight >= 0.01 for c in cells) == 10
