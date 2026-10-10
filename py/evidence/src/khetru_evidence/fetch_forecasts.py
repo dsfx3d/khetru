@@ -25,7 +25,7 @@ Two adapters produce the same normalised record (``forecasts``):
   them, and the era-decoding tests in ``test_forecasts_crosssource.py`` exercise
   them. ``raw_sha256`` covers the cf file bytes then the pf file bytes.
 
-Both adapters call ``guard`` first: pre-2026 Oct–Nov forecast values are never
+Both adapters call ``guard`` first: pre-2026 Oct–Dec forecast values are never
 fetched before the bundle tag and its hindcast ``started`` run is on origin
 (KTD10, KTD11).
 
@@ -55,10 +55,13 @@ ARCHIVE_BOX = forecasts.MANDI_BOX
 TIGGE_DATASET = "tigge-forecasts"
 TIGGE_URL = "https://ecds.ecmwf.int/api"
 RUN_HOURS = (0, 12)
-ARCHIVE_SEASON = ((10, 1), (11, 30))  # inclusive (month, day)
+# Inclusive (month, day). 16 Dec ends week 50, the last sowing week in the CSK HPKV
+# guidance; the cron in evidence-archive.yml must cover the same days plus one.
+ARCHIVE_SEASON = ((10, 1), (12, 16))
 
-# Pre-2026 Oct–Nov forecasts stay closed until the bundle tag (KTD11).
-PROTECTED_MONTHS = (10, 11)
+# Pre-2026 Oct–Dec forecasts stay closed until the bundle tag (KTD11). All of
+# December is closed, a superset of any issue date the sowing window could hold.
+PROTECTED_MONTHS = (10, 11, 12)
 PROTECTED_BEFORE_YEAR = 2026
 MAX_STEP_HOURS = 360
 BUNDLE_TAG_PATTERN = f"{LEDGER}/bundle-v*"
@@ -68,14 +71,14 @@ _TP_PARAMS = (228, 228228)
 
 
 class ProtectedDateError(RuntimeError):
-    """The request would open pre-2026 Oct–Nov forecast values before pre-registration."""
+    """The request would open pre-2026 Oct–Dec forecast values before pre-registration."""
 
 
 # --- the shared date guard ---------------------------------------------------
 
 
 def is_protected(init: datetime) -> bool:
-    """Whether any day from ``init`` to its last step falls in a pre-2026 Oct or Nov."""
+    """Whether any day from ``init`` to its last step falls in a pre-2026 Oct, Nov or Dec."""
     day, last = init.date(), (init + timedelta(hours=MAX_STEP_HOURS)).date()
     while day <= last:
         if day.year < PROTECTED_BEFORE_YEAR and day.month in PROTECTED_MONTHS:
@@ -94,7 +97,7 @@ def guard(init: datetime, repo: Path) -> None:
     if _unlocked(Path(repo)):
         return
     raise ProtectedDateError(
-        f"refusing {init:%Y-%m-%dT%HZ}: pre-{PROTECTED_BEFORE_YEAR} Oct–Nov forecasts stay closed "
+        f"refusing {init:%Y-%m-%dT%HZ}: pre-{PROTECTED_BEFORE_YEAR} Oct–Dec forecasts stay closed "
         f"until a {BUNDLE_TAG_PATTERN} tag and its hindcast started run are on origin (KTD11)"
     )
 
@@ -357,7 +360,7 @@ def archive(day: date, hours=RUN_HOURS, *, repo: Path, source: str = "ecmwf") ->
     the other runs are still archived.
     """
     if not in_archive_season(day):
-        print(f"evidence archive: {day} is outside the 1 Oct–30 Nov archive season; nothing to do")
+        print(f"evidence archive: {day} is outside the 1 Oct–16 Dec archive season; nothing to do")
         return 0
     repo = Path(repo)
     root, cache = repo / "ledger" / LEDGER, repo / ".cache" / "evidence"

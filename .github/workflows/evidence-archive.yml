@@ -5,9 +5,11 @@ name: evidence-archive
 # the AWS mirror by dispatching with a list of dates and source=aws.
 on:
   schedule:
-    # 22:00 UTC daily in Oct and Nov: today's 00 and 12 UTC runs are complete
-    # by then. `evidence archive` itself skips days outside 1 Oct-30 Nov.
+    # 22:00 UTC daily from 1 Oct to 17 Dec: today's 00 and 12 UTC runs are
+    # complete by then. `evidence archive` itself skips days outside 1 Oct-16 Dec;
+    # the 17 Dec run only retries 16 Dec as "yesterday".
     - cron: "0 22 * 10,11 *"
+    - cron: "0 22 1-17 12 *"
   workflow_dispatch:
     inputs:
       date:
