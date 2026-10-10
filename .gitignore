@@ -8,5 +8,6 @@ __pycache__/
 
 # Raw GRIB downloads; only Mandi-box extracts are committed under ledger/.
 .cache/evidence/
-# Interrupted write-once record writes (forecasts.write_record)
+# Interrupted write-once record writes (forecasts.write_once)
 ledger/**/.ens-*.tmp
+ledger/**/.imd-*.tmp

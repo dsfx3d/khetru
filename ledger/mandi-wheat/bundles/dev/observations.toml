@@ -1,0 +1,25 @@
+# Development bundle, observation rules: untagged placeholders for building and
+# testing U4. The owner chooses every value for bundles/v1/ at U8. A separate
+# file because bundle.toml was already committed and bundles/ is write-once.
+
+[observations]
+# Share of a verdict band's weight that must hold a value; below it an observed
+# day has no band value and its window is `unverifiable` (KTD4). The same share
+# applies to forecasts.
+coverage_share = 1.0
+
+# Independent rain episodes (KTD8): a day whose band mean reaches wet_day_mm is
+# a wet day; wet days with fewer than dry_day_gap_days dry days between them
+# are one episode.
+wet_day_mm = 1.0
+dry_day_gap_days = 3
+
+# Climatology: IMD final years from climatology_first_year on. A window's
+# probability pools every window starting within climatology_half_window_days
+# of its calendar date, and is (events + pseudo) / (windows + 2 * pseudo).
+climatology_first_year = 1991
+climatology_half_window_days = 7
+climatology_pseudo_count = 0.5
+
+# Last IMD date (MM-DD) counted for "next rain before the sowing cutoff".
+sowing_cutoff = "11-30"

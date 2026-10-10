@@ -41,7 +41,45 @@ observed field into the band value with these weights and one coverage rule.
 `uv run --all-packages evidence bands build` (needs `uv sync --all-extras`)
 rebuilds the map and fails unless it matches the committed file byte for byte.
 
+## Observations
+
+`observations/imd-<vintage>-<first>-<last>.json.gz` holds IMD 0.25° gridded
+daily rainfall for a run of consecutive dates: gzip-compressed canonical JSON
+with mm per day on the same cells as the forecast inputs (`null` where IMD has
+no value), the source URL, and the SHA-256 of each raw IMD file. A vintage is
+`final-r<YYYYMMDD>` or `realtime-r<YYYYMMDD>`, after the UTC date of retrieval.
+Files are write-once: a later retrieval of the same dates is a new vintage in a
+new file, and both stay. `khetru_evidence.observations.load` reads one vintage
+by name.
+
+IMD's date D is the 24 hours ending 08:30 IST (03:00 UTC) on D. IMD's bulletins
+state this for station rainfall ("rainfall for the 24 hrs ending at 0830 hrs of
+date"); Pai et al. (2014), the paper behind the gridded product, does not state
+it, so the grid is taken to keep its stations' convention. A claim window's
+rain-day ending 03:00 UTC on D is therefore IMD's date D.
+
+- `uv run --all-packages evidence observe fetch-final --years 1991 2025` saves
+  one record per year from IMD's yearly files (needs `uv sync --all-extras`). A
+  year whose raw file is already saved is skipped.
+- `uv run --all-packages evidence observe fetch-realtime --dates 2026-10-01 2026-10-09`
+  saves one record of IMD's provisional daily files.
+- `uv run --all-packages evidence observe base-rates --vintage <final vintage> [--provisional <real-time vintage>]`
+  writes `base-rates.md`; with `--check` it fails unless the committed table
+  matches. The tests run the same check.
+
+`base-rates.md` uses the development rule values in
+`bundles/dev/observations.toml`. They are placeholders; the owner chooses the
+bundle v1 values at U8.
+
 ## Data attribution
+
+Observed rainfall: India Meteorological Department, 0.25° gridded daily
+rainfall (https://www.imdpune.gov.in/cmpg/Griddata/Rainfall_25_Bin.html) and
+its real-time counterpart. IMD asks that work using it cite Pai D.S., Latha
+Sridhar, Rajeevan M., Sreejith O.P., Satbhai N.S. and Mukhopadhyay B. (2014),
+MAUSAM 65(1), 1-18. The files here are cropped to the Mandi box and rounded to
+0.001 mm. IMD's download pages state no licence.
+
 
 Forecast data: ECMWF, licensed under Creative Commons Attribution 4.0
 International (CC BY 4.0), https://creativecommons.org/licenses/by/4.0/.

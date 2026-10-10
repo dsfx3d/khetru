@@ -325,13 +325,22 @@ def write_record(ledger_root: Path, record: dict) -> tuple[str, bool]:
     """Save ``record`` write-once; returns (relative path, whether a file was written).
 
     Saving an identical record again is a no-op. A different record for a saved
-    init is refused and the file is left untouched. The bytes go to a temporary
-    sibling first and are linked into place once complete, so a failed write
-    never leaves a partial file at the final path.
+    init is refused and the file is left untouched.
     """
-    data = encode_record(record)
     rel = record_path(record["source"], record_init(record))
-    path = Path(ledger_root) / rel
+    try:
+        return rel, write_once(Path(ledger_root) / rel, encode_record(record))
+    except FileExistsError:
+        raise RecordError(f"{rel} already exists with different content; inputs are write-once") from None
+
+
+def write_once(path: Path, data: bytes) -> bool:
+    """Write ``data`` to ``path`` unless it is already there; True if a file was written.
+
+    Raises ``FileExistsError`` when ``path`` holds other bytes. The bytes go to a
+    temporary sibling first and are linked into place once complete, so a failed
+    write never leaves a partial file at the final path.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
@@ -342,11 +351,11 @@ def write_record(ledger_root: Path, record: dict) -> tuple[str, bool]:
         os.link(tmp, path)
     except FileExistsError:
         if path.read_bytes() == data:
-            return rel, False
-        raise RecordError(f"{rel} already exists with different content; inputs are write-once")
+            return False
+        raise
     finally:
         os.unlink(tmp)
-    return rel, True
+    return True
 
 
 # --- using a record ----------------------------------------------------------

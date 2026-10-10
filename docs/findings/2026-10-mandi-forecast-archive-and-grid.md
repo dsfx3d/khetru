@@ -89,7 +89,7 @@ This check did not load a DEM, so it gives no measured band split per cell. That
 
 | Item | State |
 |---|---|
-| IMD daily accumulation convention | Not confirmed from a source read during this check. The commonly cited convention is 24 hours ending 08:30 IST (03:00 UTC) on the stated date. The IMD product page does not state it. Confirm from Pai et al. (2014) before U4 fixes the window alignment |
+| IMD daily accumulation convention | Checked in U4 (2026-10-10). Pai et al. (2014) does not state it. IMD bulletins state it for station rainfall: the 24 hours ending 08:30 IST (03:00 UTC), recorded against that date. The grid is taken to keep its stations' convention; see `ledger/mandi-wheat/README.md` |
 | IMD final-release timing | Not found. The product page listed data to 2024 while the 2025 file already downloads, so the page lags the files |
 | Gauges per cell | No public list found in one search. Without it there is no independent evidence for separating bands |
 | First usable season | The dataset page says TIGGE has been available since October 2006. Whether ECMWF runs cover the whole 15 October to 15 November 2006 window was not checked, because that would mean requesting protected dates |
