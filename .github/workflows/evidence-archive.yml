@@ -86,16 +86,8 @@ jobs:
           status=0
           evidence() { uv run --all-packages evidence "$@"; }
 
-          # Idempotent: init times already saved are skipped before any download.
-          archive() {
-            if [ -n "$DATE" ]; then
-              evidence archive --date "$DATE" --time "$TIME" --source "$SOURCE" || status=1
-            else
-              # Yesterday too, so one failed day is retried while the portal still has it.
-              evidence archive --date "$(date -u -d yesterday +%F)" --source "$SOURCE" || status=1
-              evidence archive --source "$SOURCE" || status=1
-            fi
-          }
+          # Idempotent: an init time already saved is skipped before any download.
+          archive() { evidence archive --date "$1" --time "$2" --source "$SOURCE" || status=1; }
 
           # Commits only new inputs files; returns 1 when there is nothing to commit.
           commit_inputs() {
@@ -105,41 +97,59 @@ jobs:
             git commit -q -m "Archive ECMWF open-data ENS runs for Mandi"
           }
 
-          archive
-          if ! commit_inputs; then
-            echo "nothing new to commit"
-            exit $status
-          fi
-
-          # Bounded reset-and-redo on a rejected push (KTD12): drop the local
-          # commit, move to the new remote head and redo the idempotent archive
-          # step there. The just-made records are kept in the ignored cache so the
-          # redo does not download them again. JSONL is never rebased or merged.
-          for attempt in 1 2 3 4 5; do
-            if git push origin "HEAD:refs/heads/$BRANCH"; then
-              exit $status
-            fi
-            echo "push rejected (attempt $attempt); resetting onto the new remote head"
-            rm -rf "$PENDING" && mkdir -p "$PENDING"
-            git diff-tree --no-commit-id --name-only -r --diff-filter=A HEAD -- "$INPUTS" \
-              | while read -r f; do mkdir -p "$PENDING/$(dirname "$f")"; cp "$f" "$PENDING/$f"; done
-            git fetch origin "$BRANCH"
-            git reset --hard FETCH_HEAD
-            (cd "$PENDING" && find . -type f) | while read -r f; do
-              if [ -e "$f" ]; then
-                # The same run from another mirror differs only in source_url; the remote copy stays.
-                cmp -s "$PENDING/$f" "$f" || evidence same-record "$PENDING/$f" "$f" \
-                  || { echo "$f differs on the remote; write-once conflict"; exit 1; }
-              else
-                mkdir -p "$(dirname "$f")"; cp "$PENDING/$f" "$f"
-              fi
-            done || exit 1
-            archive
+          # Archives one run, then commits and pushes it before the next one
+          # starts, so a job stopped partway keeps every run it finished.
+          save() {
+            archive "$1" "$2"
             if ! commit_inputs; then
-              echo "remote already holds every new record"
-              exit $status
+              echo "nothing new to commit for $1 ${2}Z"
+              return 0
             fi
-            sleep $((attempt * 10))
-          done
-          echo "push still rejected after 5 attempts" >&2
-          exit 1
+
+            # Bounded reset-and-redo on a rejected push (KTD12): drop the local
+            # commit, move to the new remote head and redo the idempotent archive
+            # step there. The just-made record is kept in the ignored cache so the
+            # redo does not download it again. JSONL is never rebased or merged.
+            for attempt in 1 2 3 4 5; do
+              if git push origin "HEAD:refs/heads/$BRANCH"; then
+                return 0
+              fi
+              echo "push rejected (attempt $attempt); resetting onto the new remote head"
+              rm -rf "$PENDING" && mkdir -p "$PENDING"
+              git diff-tree --no-commit-id --name-only -r --diff-filter=A HEAD -- "$INPUTS" \
+                | while read -r f; do mkdir -p "$PENDING/$(dirname "$f")"; cp "$f" "$PENDING/$f"; done
+              git fetch origin "$BRANCH"
+              git reset --hard FETCH_HEAD
+              (cd "$PENDING" && find . -type f) | while read -r f; do
+                if [ -e "$f" ]; then
+                  # The same run from another mirror differs only in source_url; the remote copy stays.
+                  cmp -s "$PENDING/$f" "$f" || evidence same-record "$PENDING/$f" "$f" \
+                    || { echo "$f differs on the remote; write-once conflict"; exit 1; }
+                else
+                  mkdir -p "$(dirname "$f")"; cp "$PENDING/$f" "$f"
+                fi
+              done || exit 1
+              archive "$1" "$2"
+              if ! commit_inputs; then
+                echo "remote already holds every new record"
+                return 0
+              fi
+              sleep $((attempt * 10))
+            done
+            echo "push still rejected after 5 attempts" >&2
+            exit 1
+          }
+
+          if [ -n "$DATE" ]; then
+            save "$DATE" "$TIME"
+          else
+            # Yesterday too, so one failed day is retried while the portal still has it.
+            yesterday=$(date -u -d yesterday +%F)
+            today=$(date -u +%F)
+            for day in "$yesterday" "$today"; do
+              for hour in 0 12; do
+                save "$day" "$hour"
+              done
+            done
+          fi
+          exit $status
