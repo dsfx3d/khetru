@@ -27,7 +27,7 @@ Mandi box plus one cell of margin, and the run's init time, model cycle, source
 URL and raw-GRIB SHA-256. Window totals are not stored; rebuild them with
 `khetru_evidence.forecasts.window_totals`. Files are write-once: `verify`
 fails if a committed one changes. The daily `evidence-archive` workflow saves
-the 00 and 12 UTC open-data runs from 1 Oct to 30 Nov.
+the 00 and 12 UTC open-data runs from 1 Oct to 16 Dec.
 
 ## Band map
 

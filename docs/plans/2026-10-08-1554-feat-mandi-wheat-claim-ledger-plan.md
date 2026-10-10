@@ -19,7 +19,7 @@ deepened: 2026-10-08
 - **Open blockers:** None for starting work. U1, this week, checks whether archived as-issued forecasts are reachable and whether the 0.25° grid separates the altitude bands. Later units adapt to its finding.
 - **Stop conditions:**
   - If U1 finds no reachable as-issued archive, skip U9 and record the finding required by Success Criteria. Live work (U6, U7, U8, U10, U11) still proceeds: U8 then waives the cross-source precondition and freezes a live-only bundle without the hindcast fields, and the STRATEGY gates stay closed as Success Criteria states.
-  - Never open archived pre-2026 Oct–Nov forecast values before the bundle tag exists (KTD11).
+  - Never open archived pre-2026 Oct–Dec forecast values before the bundle tag exists (KTD11).
   - Never edit, delete, or rewrite a committed ledger line or a bundle tag (R6, R14).
 - **Execution profile:** One owner-operator, in phases from Oct 2026 to the rabi 2027 settlement date (see Phased Delivery). Two units hold owner decisions that an agent must not make: U1 (feasibility verdict) and U8 (rule values and tagging).
 - **Who finishes:** The project owner runs `ce-work` per phase, reviews, and pushes to `github.com/dsfx3d/khetru`. The bundle tag and each hindcast run are owner actions.
@@ -304,14 +304,15 @@ These are owner decisions, made once from U4's base-rate table and U8's power si
   - The first tagged bundle's hindcast is the gate verdict, and a later bundle's hindcast never replaces it (R14).
   - Live claims accumulate across seasons only while the claim rule, threshold, window and band map are unchanged.
 - KTD10. **Hindcast runs follow a lifecycle in `runs.jsonl`: `started`, `aborted`, `recorded`, `invalidated`.**
-  - `started` must be pushed and stamped before any Oct–Nov TIGGE fetch.
+  - `started` must be pushed and stamped before any Oct–Dec TIGGE fetch.
   - A run's claims, scores and `recorded` entry land in one commit.
   - `aborted` needs a reason and leaves no claims or scores. It allows a fresh `started`. When the abort was caused by a code defect, the entry names the defect and its fix commit, and the code-freeze check accepts that commit as it does for `invalidated`. Without a named fix, bundle, code and data are frozen, so a re-run reproduces the same result.
   - `invalidated` needs a code defect and a fix commit, and allows one new run under the same tag.
   - The report lists every run. This implements the Key Decision on hindcast invalidation (R14).
 - KTD11. **Development data policy.**
   - Code is built and tested only on synthetic fixtures, IMD observations, and forecasts saved from rabi 2026 onward.
-  - Pre-2026 Oct–Nov forecast values are never fetched before the tag, from TIGGE or from any open-data mirror.
+  - Pre-2026 Oct–Dec forecast values are never fetched before the tag, from TIGGE or from any open-data mirror.
+  - December joined the closed months (owner-approved 2026-10-11). The rule first named October and November only. CSK HPKV guidance says wheat sowing "should be ensured by the week 50 (10–16th December)" (Prasad, Rao & Rao 2015, https://zenodo.org/records/14292957, section 3.10), so issue dates may later run to mid-December. The whole month is closed, a superset of any such date. Issue dates themselves are unchanged; adopting December ones is a later owner decision.
   - Rabi 2026 is development data, never part of any verdict. It is also where the KTD2 cross-source test runs.
   - Until bundle v1 is tagged, the project does not compute, report or tune on Brier scores or skill against climatology for rabi 2026. Exploratory scoring reports only pipeline and integrity results (counts, outcome labels, re-derivability), so no rule value can be chosen from forecast outcomes.
   - This is a rule of conduct, and the entry format is not the safeguard (owner-approved 2026-10-11). A claim publishes its probability and IMD rainfall is public, so anyone can work out a Brier score for a rabi 2026 claim. The code enforces the rule where it can: `evidence score` prints outcomes and counts only, and the skill aggregates refuse a bundle with no recorded tag.
@@ -490,14 +491,14 @@ docs/findings/        # U1 feasibility finding
 - **Dependencies:** None.
 - **Files:** `docs/findings/2026-10-mandi-forecast-archive-and-grid.md`; `ledger/mandi-wheat/rehearsal-2026.md` (the optional hand-issued rehearsal log from Scope Boundaries, never read by code).
 - **Approach:**
-  1. Register for, or confirm, ECMWF Data Store access to TIGGE. Retrieve one ECMWF ENS precipitation field for a July date, never Oct–Nov (KTD11). Record the member layout, the steps and units, the 0.25° interpolation option, the licence for ECMWF fields, and the season range.
-  2. If TIGGE is closed to new users, check the depth of the GEFS operational archive on AWS (KTD2 fallback) and record it. Also record the ECMWF open-data AWS mirror (same model family, from 2023-01) as a possible short hindcast source, by listing, not opening, Oct–Nov files.
+  1. Register for, or confirm, ECMWF Data Store access to TIGGE. Retrieve one ECMWF ENS precipitation field for a July date, never Oct–Dec (KTD11). Record the member layout, the steps and units, the 0.25° interpolation option, the licence for ECMWF fields, and the season range.
+  2. If TIGGE is closed to new users, check the depth of the GEFS operational archive on AWS (KTD2 fallback) and record it. Also record the ECMWF open-data AWS mirror (same model family, from 2023-01) as a possible short hindcast source, by listing, not opening, Oct–Dec files.
   3. Confirm IMD access via `imdlib` for both the final and the real-time products, record IMD's daily accumulation convention (KTD3), and record the final-release timing if it is published.
   4. Overlay the IMD 0.25° cells on the Mandi polygon. Count the cells, and look for any public list of gauges per cell (KTD4).
   5. Write the finding: the archive source, the number of usable seasons (rabi 2006–2025 at most, excluding 2026), the expected verdict-band count, and whether a hindcast can run. If none can, the finding states that the gate cannot be met before about 2029, and the owner sets the date by which STRATEGY names a replacement gate.
 - **Execution note:** This is investigation, not product code. Any throwaway scripts stay out of `py/evidence`. Do U1 alongside U2 and U5, which must not wait for it.
 - **Test expectation:** none — produces a written finding. U2–U5 encode its facts.
-- **Verification:** The finding names one archive (or none) with its season range and licence, the IMD convention, the cell count, and the default verdict-band count. No pre-2026 Oct–Nov forecast value was opened.
+- **Verification:** The finding names one archive (or none) with its season range and licence, the IMD convention, the cell count, and the default verdict-band count. No pre-2026 Oct–Dec forecast value was opened.
 
 ### U2. Package scaffold, ledger store, semantics, verify
 
@@ -593,10 +594,11 @@ docs/findings/        # U1 feasibility finding
 - **Dependencies:** U2.
 - **Files:** `py/evidence/src/khetru_evidence/forecasts.py`, `py/evidence/src/khetru_evidence/fetch_forecasts.py`, `py/evidence/tests/test_forecasts.py`, `py/evidence/tests/test_forecasts_crosssource.py`, `.github/workflows/evidence-archive.yml`, `ledger/mandi-wheat/inputs/`.
 - **Approach:**
-  1. Build the open-data adapter. Every day from 1 Oct to 30 Nov, fetch the 00 and 12 UTC ENS runs, with control and perturbed members and cumulative precipitation at every native step from 0 to 360 h. Crop to the Mandi box plus one cell of margin, convert to mm, and write one compressed, write-once normalised record per run (KTD2). Window totals are never stored.
-  2. Build a TIGGE adapter that produces the same record. One shared guard, used by both adapters, refuses pre-2026 Oct–Nov dates unless a bundle tag exists and its `started` entry is on origin (KTD10, KTD11).
+  1. Build the open-data adapter. Every day from 1 Oct to 16 Dec, fetch the 00 and 12 UTC ENS runs, with control and perturbed members and cumulative precipitation at every native step from 0 to 360 h. Crop to the Mandi box plus one cell of margin, convert to mm, and write one compressed, write-once normalised record per run (KTD2). Window totals are never stored.
+  2. Build a TIGGE adapter that produces the same record. One shared guard, used by both adapters, refuses pre-2026 Oct–Dec dates unless a bundle tag exists and its `started` entry is on origin (KTD10, KTD11).
   3. Add the daily archive workflow in the shared concurrency group with the reset-and-redo push routine (KTD12). It skips init times that are already saved.
   4. Add ECMWF CC BY 4.0 attribution to the ledger README.
+- **Deviation (owner-approved 2026-10-11):** The archive first ran from 1 Oct to 30 Nov and the guard covered October and November. The archive now runs to 16 Dec and the guard covers all of December (KTD11). 16 Dec ends week 50, the last sowing week in the CSK HPKV guidance (Prasad, Rao & Rao 2015, https://zenodo.org/records/14292957, section 3.10). The workflow also runs on 17 Dec, to retry 16 Dec while the portal still has it. No issue date changes.
 - **Execution note:** Ship the open-data archiving first, by about 15 Oct 2026 if possible, even before any derived code exists. Every day missed is rabi 2026 development data lost for good.
 - **Test scenarios:**
   - From a fixture GRIB with 2 members, a 2×2 box and 6-hourly steps, totals rebuilt from the saved record for any window match a direct sum of the GRIB.
@@ -604,9 +606,9 @@ docs/findings/        # U1 feasibility finding
   - The control member is present in the record, separate from the perturbed members, and n counts both.
   - A record whose cell coordinates are off the IMD lattice is rejected.
   - Archiving the same init time twice writes one file.
-  - A pre-2026 Oct–Nov TIGGE request with no tag is refused, and so is a 2024-10 open-data request (AWS mirror) with no tag.
+  - A pre-2026 Oct–Dec TIGGE request with no tag is refused, and so is a 2024-10 open-data request (AWS mirror) with no tag.
   - A missing step is recorded as a failure, never as a silently short series.
-  - The TIGGE adapter decodes one non-Oct–Nov date from each ENS resolution or model-cycle era between 2006 and 2025, so archive-format surprises surface before the tag (KTD11 permits this).
+  - The TIGGE adapter decodes one non-Oct–Dec date from each ENS resolution or model-cycle era between 2006 and 2025, so archive-format surprises surface before the tag (KTD11 permits this).
   - The cross-source test (run once rabi 2026 runs exist): for one rabi 2026 init time, band-mean totals from TIGGE and from our saved open-data run agree within the stated tolerance.
 - **Verification:** The archive workflow has committed a real run, and its hash matches a fresh download made the same day. The cross-source test passes before U8 starts.
 
@@ -795,7 +797,7 @@ docs/findings/        # U1 feasibility finding
 | Pre-registration | Tag `mandi-wheat/bundle-v1` on `origin`; OpenTimestamps proof committed; bundle hash check passes | U8, U9 |
 | Live and hindcast parity | `test_parity.py` (same core, same bodies apart from `kind` and `run_id`); `test_forecasts_crosssource.py` on a rabi 2026 init time | U5, U6, U7; the cross-source test gates U8 |
 | Report reproducibility | Byte-identical regeneration of `REPORT.md` inside `verify` | U10 onward |
-| Development-data guard | No Oct–Nov pre-2026 ENS retrieval (TIGGE or open-data mirror) in git history or logs before the tag | U1, U5, U9 |
+| Development-data guard | No Oct–Dec pre-2026 ENS retrieval (TIGGE or open-data mirror) in git history or logs before the tag | U1, U5, U9 |
 
 ---
 

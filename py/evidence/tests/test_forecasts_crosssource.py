@@ -6,7 +6,7 @@ and the cross-source test also needs a saved rabi 2026 open-data run, which the
 daily archive only starts producing in Oct 2026 (TIGGE adds a 48 h delay).
 Run them with ``EVIDENCE_NETWORK_TESTS=1``.
 
-No date here touches a pre-2026 Oct–Nov forecast (KTD11); the guard would refuse
+No date here touches a pre-2026 Oct–Dec forecast (KTD11); the guard would refuse
 it anyway.
 """
 
@@ -44,8 +44,8 @@ pytestmark = [
     ),
 ]
 
-# One non-Oct–Nov init per ECMWF ENS resolution era in TIGGE (from Oct 2006).
-# Mid-month inits keep every step (to 360 h) outside Oct and Nov.
+# One non-Oct–Dec init per ECMWF ENS resolution era in TIGGE (from Oct 2006).
+# Mid-month inits keep every step (to 360 h) outside Oct, Nov and Dec.
 ERA_INITS = {
     "TL399 VAREPS (2006-2009)": datetime(2007, 1, 15, tzinfo=UTC),
     "TL639 (2010-2016)": datetime(2010, 7, 15, tzinfo=UTC),
