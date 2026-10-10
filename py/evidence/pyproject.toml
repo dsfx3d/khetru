@@ -18,6 +18,8 @@ dependencies = [
 [project.optional-dependencies]
 # Band map build (`evidence bands build`): reads the DEM tiles and rasterises the polygon.
 geo = ["rasterio>=1.4"]
+# IMD downloads (`evidence observe fetch-final`, `fetch-realtime`).
+obs = ["imdlib>=0.3.1"]
 
 [project.scripts]
 evidence = "khetru_evidence.cli:main"

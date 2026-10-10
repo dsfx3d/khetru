@@ -1,4 +1,4 @@
-"""`evidence` command line. Subcommands are added per unit: `verify` (U2), `bands` (U3), `archive` and `same-record` (U5)."""
+"""`evidence` command line. Subcommands are added per unit: `verify` (U2), `bands` (U3), `observe` (U4), `archive` and `same-record` (U5)."""
 
 import argparse
 import subprocess
@@ -53,6 +53,22 @@ def main(argv: list[str] | None = None) -> int:
     bands_cmd.add_argument("--repo", type=Path, help="repository root (default: current repo)")
     bands_cmd.set_defaults(run=_run_bands)
 
+    observe_cmd = commands.add_parser(
+        "observe", help="fetch-final, fetch-realtime: save IMD rainfall as write-once observations; "
+        "base-rates: write the base-rate table from the saved files, or check it reproduces"
+    )
+    observe_cmd.add_argument("action", choices=("fetch-final", "fetch-realtime", "base-rates"))
+    observe_cmd.add_argument("--years", type=int, nargs=2, metavar=("FIRST", "LAST"),
+                             help="fetch-final: years to save")
+    observe_cmd.add_argument("--dates", type=date.fromisoformat, nargs=2, metavar=("FIRST", "LAST"),
+                             help="fetch-realtime: IMD dates YYYY-MM-DD to save as one record")
+    observe_cmd.add_argument("--vintage", help="base-rates: the final vintage to use")
+    observe_cmd.add_argument("--provisional", help="base-rates: a real-time vintage to set beside it")
+    observe_cmd.add_argument("--check", action="store_true",
+                             help="base-rates: exit 1 unless the committed table matches")
+    observe_cmd.add_argument("--repo", type=Path, help="repository root (default: current repo)")
+    observe_cmd.set_defaults(run=_run_observe)
+
     args = parser.parse_args(argv)
     return args.run(args)
 
@@ -92,6 +108,30 @@ def _run_bands(args: argparse.Namespace) -> int:
 
     run = {"build": fetch_bands.build, "zones": fetch_bands.zones}[args.action]
     return run(repo=_repo_root(args))
+
+
+def _run_observe(args: argparse.Namespace) -> int:
+    repo = _repo_root(args)
+    if args.action == "base-rates":
+        from khetru_evidence import observations
+
+        if not args.vintage:
+            print("evidence observe base-rates: --vintage is required", file=sys.stderr)
+            return 2
+        return observations.write_base_rates(
+            repo=repo, vintage=args.vintage, provisional=args.provisional, check=args.check
+        )
+    from khetru_evidence import fetch_observations
+
+    if args.action == "fetch-final":
+        if not args.years:
+            print("evidence observe fetch-final: --years is required", file=sys.stderr)
+            return 2
+        return fetch_observations.fetch_final(*args.years, repo=repo)
+    if not args.dates:
+        print("evidence observe fetch-realtime: --dates is required", file=sys.stderr)
+        return 2
+    return fetch_observations.fetch_realtime(*args.dates, repo=repo)
 
 
 def _run_same_record(args: argparse.Namespace) -> int:
