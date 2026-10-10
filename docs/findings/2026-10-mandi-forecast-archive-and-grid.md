@@ -1,10 +1,10 @@
 # Mandi forecast archive and grid: U1 feasibility finding
 
 - **Date:** 2026-10-10
-- **Status:** Draft for the owner's verdict. The checks below were run; the verdict is the owner's.
+- **Status:** Accepted by the owner on 2026-10-10.
 - **Plan unit:** U1 in `docs/plans/2026-10-08-1554-feat-mandi-wheat-claim-ledger-plan.md`
 
-## Proposed verdict
+## Verdict
 
 A hindcast can run. The TIGGE archive on the ECMWF Data Store is reachable with a new account and returns ECMWF ensemble precipitation for Mandi on the same 0.25° lattice the ledger already uses. One district-wide verdict band is the expected outcome.
 
@@ -97,8 +97,7 @@ This check did not load a DEM, so it gives no measured band split per cell. That
 
 ## Owner decision
 
-1. Accept or reject the proposed verdict: a hindcast can run on TIGGE ECMWF fields, with one district-wide verdict band as the default.
-2. If accepted, U3 (band map) and the cross-source test in U5 are unblocked.
+Accepted on 2026-10-10: a hindcast can run on TIGGE ECMWF fields, with one district-wide verdict band as the default. U3 (band map) and the cross-source test in U5 are unblocked. The open items above carry forward to U3 and U4.
 
 ## Sources
 
