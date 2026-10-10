@@ -146,6 +146,8 @@ def test_with_no_saved_run_issue_refuses_unless_told_to_abstain(tmp_path):
     assert not (lg.root / EXPLORATORY).exists()
     [entry] = issue(lg, abstain_if_missing=True)
     assert (entry["type"], entry["reason"]) == ("abstain", "no forecast coverage for this band")
+    # The slot is filled: issuing again writes nothing, with or without a saved run.
+    assert issue(lg) == []
 
 
 def test_an_exploratory_claim_may_be_issued_after_its_window_but_a_live_one_may_not(tmp_path):
@@ -179,6 +181,21 @@ def test_every_claim_re_derives_from_the_files_it_names(tmp_path):
     # A run archived after the abstain does not change what the abstain was made from.
     fc.write_record(lg.root, record(TOTALS_30_OF_51, init=datetime(2026, 10, 26, tzinfo=UTC)))
     assert claims.check(lg, EXPLORATORY) == []
+
+
+def test_a_file_added_to_the_bundle_later_leaves_earlier_claims_re_derivable(ledger):
+    issue(ledger)
+    (ledger.root / "bundles/dev/scoring.toml").write_text("[scoring]\nseed = 1\n")
+    assert claims.check(ledger, EXPLORATORY) == []
+    assert [p.name for p in claims.Bundle(ledger.root, "dev").files] == [
+        "bundle.toml", "claims.toml", "observations.toml"]
+
+
+def test_check_reports_a_claim_that_its_evidence_files_do_not_reproduce(ledger):
+    [entry] = issue(ledger)
+    forged = {**entry, "probability": 0.9}
+    (ledger.root / EXPLORATORY).write_bytes(L.encode(forged))
+    assert claims.check(ledger, EXPLORATORY) == [f"{entry['id']}: does not re-derive from its evidence files"]
 
 
 def test_check_reports_a_claim_whose_evidence_file_changed(ledger):

@@ -30,16 +30,20 @@ class Bundle:
     def __init__(self, ledger_root: Path, name: str):
         self.name = name
         directory = Path(ledger_root) / BUNDLES_DIR / name
-        self.files = sorted(directory.glob("*.toml"))
-        if not self.files:
+        self._tomls = sorted(directory.glob("*.toml"))
+        if not self._tomls:
             raise claim_core.ClaimError(f"no bundle {name!r} under {directory.parent}")
-        self.sem = semantics.load(self._holding("semantics"))
-        self.rule = claim_core.load_rule(self._holding("claims"))
-        self.coverage_share = obs_core.load_rules(self._holding("observations")).coverage_share
+        sem, rule, obs = (self._holding(table) for table in ("semantics", "claims", "observations"))
+        self.sem = semantics.load(sem)
+        self.rule = claim_core.load_rule(rule)
+        self.coverage_share = obs_core.load_rules(obs).coverage_share
+        # Only the files a claim is made from are its evidence, so a file added
+        # to the bundle later leaves earlier claims re-derivable.
+        self.files = sorted({sem, rule, obs})
 
     def _holding(self, table: str) -> Path:
         """The bundle file with ``table``; a bundle may keep its tables in one file or several."""
-        found = [p for p in self.files if table in tomllib.loads(p.read_text())]
+        found = [p for p in self._tomls if table in tomllib.loads(p.read_text())]
         if len(found) != 1:
             raise claim_core.ClaimError(f"bundle {self.name} must hold exactly one [{table}] table")
         return found[0]
@@ -97,6 +101,12 @@ def issue(ledger: L.Ledger, issue_date: date, *, bundle: str, kind: str, code: s
         raise claim_core.ClaimError(
             f"the {issue_date} window started at {L.timestamp(times.late_cutoff)}; "
             "a live claim is never back-filled (R10a)")
+    rel = kind_file(kind)
+    taken = {e["id"] for e in ledger.read(rel)}
+    band_map = bands.decode((ledger.root / bands.BAND_MAP_PATH).read_bytes())
+    if all(L.slot_id(ledger.name, kind, bundle, band, issue_date.isoformat()) in taken
+           for band in band_map.verdict_bands):
+        return []
     saved = ledger.root / forecasts.record_path(source, times.run_init)
     if not saved.exists():
         if not abstain_if_missing:
@@ -104,8 +114,6 @@ def issue(ledger: L.Ledger, issue_date: date, *, bundle: str, kind: str, code: s
                 f"no saved {source} record for the {issue_date} run; archive it first, "
                 "or pass --abstain-if-missing to record an abstain")
         saved = None
-    rel = kind_file(kind)
-    taken = {e["id"] for e in ledger.read(rel)}
     written = []
     for body in bodies(ledger.root, b, issue_date, saved):
         new = entry(body, ledger=ledger.name, kind=kind, bundle=bundle, code=code)
