@@ -1,12 +1,13 @@
-"""`evidence` command line. Subcommands are added per unit: `verify` (U2), `bands` (U3), `observe` (U4), `archive` and `same-record` (U5)."""
+"""`evidence` command line. Subcommands are added per unit: `verify` (U2), `bands` (U3), `observe` (U4), `archive` and `same-record` (U5), `issue` (U6)."""
 
 import argparse
+import os
 import subprocess
 import sys
 from datetime import UTC, date, datetime
 from pathlib import Path, PurePosixPath
 
-from khetru_evidence.ledger import MANIFEST_DIR, WRITE_ONCE_DIRS, Ledger
+from khetru_evidence.ledger import DEV_BUNDLE, MANIFEST_DIR, WRITE_ONCE_DIRS, Ledger
 
 LEDGERS_DIR = "ledger"
 
@@ -68,6 +69,23 @@ def main(argv: list[str] | None = None) -> int:
                              help="base-rates: exit 1 unless the committed table matches")
     observe_cmd.add_argument("--repo", type=Path, help="repository root (default: current repo)")
     observe_cmd.set_defaults(run=_run_observe)
+
+    issue_cmd = commands.add_parser(
+        "issue", help="--date: append that issue date's claim per verdict band; --backfill-missing: "
+        "record not_issued for started windows with no claim; --check: re-derive every claim"
+    )
+    action = issue_cmd.add_mutually_exclusive_group(required=True)
+    action.add_argument("--date", type=date.fromisoformat, help="issue date YYYY-MM-DD")
+    action.add_argument("--backfill-missing", action="store_true")
+    action.add_argument("--check", action="store_true")
+    issue_cmd.add_argument("--abstain-if-missing", action="store_true",
+                           help="--date: with no saved run, record an abstain instead of failing")
+    issue_cmd.add_argument("--year", type=int, help="--backfill-missing: season year (default: this year, UTC)")
+    issue_cmd.add_argument("--bundle", default=DEV_BUNDLE,
+                           help="bundle name (default: dev, whose entries are exploratory)")
+    issue_cmd.add_argument("--ledger", default="mandi-wheat")
+    issue_cmd.add_argument("--repo", type=Path, help="repository root (default: current repo)")
+    issue_cmd.set_defaults(run=_run_issue)
 
     args = parser.parse_args(argv)
     return args.run(args)
@@ -132,6 +150,41 @@ def _run_observe(args: argparse.Namespace) -> int:
         print("evidence observe fetch-realtime: --dates is required", file=sys.stderr)
         return 2
     return fetch_observations.fetch_realtime(*args.dates, repo=repo)
+
+
+def _run_issue(args: argparse.Namespace) -> int:
+    from khetru_evidence import claims
+
+    repo = _repo_root(args)
+    ledger = Ledger(repo / LEDGERS_DIR / args.ledger)
+    kind = "exploratory" if args.bundle == DEV_BUNDLE else "live"
+    try:
+        if args.check:
+            problems = [p for rel in ledger.ledger_files() if PurePosixPath(rel).name == "claims.jsonl"
+                        or PurePosixPath(rel).parts[0] == "claims" for p in claims.check(ledger, rel)]
+            for problem in problems:
+                print(problem, file=sys.stderr)
+            print(f"evidence issue: {len(problems)} problem(s)" if problems else "evidence issue: ok")
+            return 1 if problems else 0
+        # Live entries are written by the GitHub workflows only (KTD12).
+        if kind == "live" and os.environ.get("GITHUB_ACTIONS") != "true":
+            print("evidence issue: live entries are never written from a local machine", file=sys.stderr)
+            return 2
+        if args.backfill_missing:
+            year = args.year or datetime.now(UTC).year
+            written = claims.backfill_missing(ledger, year, bundle=args.bundle, kind=kind)
+        else:
+            code = _git(repo, "rev-parse", "HEAD").decode().strip()
+            written = claims.issue(ledger, args.date, bundle=args.bundle, kind=kind, code=code,
+                                   abstain_if_missing=args.abstain_if_missing)
+    except ValueError as e:  # claim, ledger, record and band-map errors
+        print(f"evidence issue: {e}", file=sys.stderr)
+        return 1
+    for e in written:
+        print(f"evidence issue: {e['type']} {e['id']}" + (f": {e['statement']}" if "statement" in e else ""))
+    if not written:
+        print("evidence issue: nothing to write")
+    return 0
 
 
 def _run_same_record(args: argparse.Namespace) -> int:

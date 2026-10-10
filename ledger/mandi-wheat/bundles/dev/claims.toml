@@ -1,0 +1,15 @@
+# Development bundle, claim rule: untagged placeholders for building and testing
+# U6. The owner chooses every value for bundles/v1/ at U8. A separate file
+# because bundles/ is write-once.
+
+[claims]
+# Name of the claim rule (R4). A later rule is a new name, never an edit.
+rule = "ens-exceedance-1"
+crop_stage = "wheat sowing"
+
+# The claim is "at least threshold_mm of band-mean rain over the claim window".
+threshold_mm = 10.0
+
+# Probability from k, the members whose band-mean window total reaches the
+# threshold, out of n members (KTD5). Never 0 or 1; nothing is fitted to outcomes.
+probability_formula = "(k + 0.5) / (n + 1)"

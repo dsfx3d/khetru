@@ -17,11 +17,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from khetru_evidence import bands as B
 from khetru_evidence import fetch_forecasts as ff
 from khetru_evidence import forecasts as fc
 
 REPO = Path(__file__).resolve().parents[3]
-INPUTS = REPO / "ledger" / "mandi-wheat" / "inputs"
+LEDGER = REPO / "ledger" / "mandi-wheat"
+INPUTS = LEDGER / "inputs"
 CACHE = REPO / ".cache" / "evidence"
 
 
@@ -53,7 +55,7 @@ ERA_INITS = {
 }
 
 # Window and tolerance for the cross-source check: the KTD3 forecast window, and
-# the ensemble-mean Mandi-box total agreeing within 5 % or 0.5 mm, whichever is
+# the ensemble-mean district band-mean total agreeing within 5 % or 0.5 mm, whichever is
 # larger. Both sources carry the same model run, so differences come only from
 # interpolation and GRIB packing.
 WINDOW = (24, 192)
@@ -80,16 +82,13 @@ def _saved_rabi_2026_run() -> dict | None:
     return None
 
 
-def _box_mean(record: dict) -> float:
-    """Ensemble-mean window total over the Mandi box cells without margin.
-
-    Stands in for the band mean until U3's band map exists.
-    """
-    lats, lons = fc.box_cells(fc.MANDI_BOX, margin=0)
-    rows = [record["lats"].index(x) for x in lats]
-    cols = [record["lons"].index(x) for x in lons]
-    totals = fc.window_totals(record, *WINDOW)[:, rows][:, :, cols]
-    return float(totals.mean())
+def _band_mean(record: dict) -> float:
+    """Ensemble mean of the members' district band-mean window totals."""
+    band_map = B.decode((LEDGER / B.BAND_MAP_PATH).read_bytes())
+    totals = fc.window_totals(record, *WINDOW)
+    mean = B.band_mean(band_map, B.DISTRICT, record["lats"], record["lons"], totals, 1.0)
+    assert mean.sufficient.all()
+    return float(mean.values.mean())
 
 
 def test_tigge_and_saved_opendata_agree_on_a_rabi_2026_init():
@@ -99,5 +98,5 @@ def test_tigge_and_saved_opendata_agree_on_a_rabi_2026_init():
     tigge = ff.fetch_tigge(fc.record_init(saved), repo=REPO, cache_dir=CACHE)
 
     assert fc.member_count(tigge) == fc.member_count(saved)
-    a, b = _box_mean(saved), _box_mean(tigge)
+    a, b = _band_mean(saved), _band_mean(tigge)
     assert abs(a - b) <= max(ABSOLUTE_TOLERANCE_MM, RELATIVE_TOLERANCE * max(a, b)), (a, b)

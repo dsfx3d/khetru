@@ -71,6 +71,29 @@ rain-day ending 03:00 UTC on D is therefore IMD's date D.
 `bundles/dev/observations.toml`. They are placeholders; the owner chooses the
 bundle v1 values at U8.
 
+## Claims
+
+`claims/<kind>.jsonl` holds one entry per verdict band and issue date: a claim,
+an abstain, or `not_issued`. A claim states a probability that the band's mean
+rain over the claim window reaches the bundle's threshold: k of the run's n
+members reach it, and the bundle's formula turns k and n into the probability.
+Each entry names the bundle files, band map and forecast record it was made
+from by SHA-256 under `evidence`, and the commit of the code under `code`.
+
+- `uv run --all-packages evidence issue --date 2026-10-19` appends that issue
+  date's claim per verdict band from the saved 00 UTC run. Issuing a date again
+  writes nothing. With no saved run it fails; `--abstain-if-missing` records
+  "can't tell — no forecast coverage for this band" instead.
+- `uv run --all-packages evidence issue --backfill-missing` records `not_issued`
+  for every issue date whose window has started with no entry. It never writes
+  a claim, and a slot marked `not_issued` stays that way.
+- `uv run --all-packages evidence issue --check` re-derives every claim from
+  the files it names and fails if one differs.
+
+Entries under the `dev` bundle are `exploratory`. Its claim rule values in
+`bundles/dev/claims.toml` are placeholders; the owner chooses the bundle v1
+values at U8. Live entries are written by the GitHub workflows only.
+
 ## Data attribution
 
 Observed rainfall: India Meteorological Department, 0.25° gridded daily
