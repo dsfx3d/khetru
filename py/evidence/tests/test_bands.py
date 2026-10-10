@@ -333,9 +333,9 @@ def test_zone_report_covers_every_scheme(geo):
     report = fb.zone_report([raster])
 
     assert all(f"### {name}" in report for name in fb.ZONE_SCHEMES)
-    # 57.9% of the rectangle is at 500 m and the rest at 1200 m: all zone 2 under the 650 m edge.
-    assert "| **District** | 100.0 | 57.9 | 42.1 | 0.0 | 0.0 | |" in report
-    assert "| **District** | 100.0 | 0.0 | 100.0 | 0.0 | 0.0 | |" in report
+    assert "zone 1 up to 650 m, zone 2 to 1800 m, zone 3 to 2200 m" in report
+    # 57.9% of the rectangle is at 500 m and the rest at 1200 m: zones 1 and 2 under every scheme.
+    assert report.count("| **District** | 100.0 | 57.9 | 42.1 | 0.0 | 0.0 | |") == len(fb.ZONE_SCHEMES)
 
 
 def test_polygon_must_be_the_one_feature_with_the_shape_id(geo):
