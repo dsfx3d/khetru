@@ -30,6 +30,8 @@ CORRECTION_ACTIONS = ("void", "fix")
 WRITE_ONCE_DIRS = ("inputs", "observations", "bands", "bundles", "stamps")
 MANIFEST_DIR = "manifests"
 DEV_BUNDLE = "dev"
+# A band named with this prefix is an exploratory view, never a verdict band (see ``views``).
+VIEW_PREFIX = "view-"
 # Claim fields a correction may fix. Everything else can affect scoring, so a
 # mistake there is handled by voiding the claim instead.
 FIXABLE_FIELDS = frozenset({"note"})
@@ -293,8 +295,17 @@ def _validate_kind(e: dict) -> None:
         raise LedgerError(f"kind must be one of {', '.join(KINDS)}")
     if e["bundle"] == DEV_BUNDLE and e["kind"] != "exploratory":
         raise LedgerError("dev bundle entries are always exploratory")
+    if e["kind"] != "exploratory" and any(band.startswith(VIEW_PREFIX) for band in _bands(e)):
+        raise LedgerError("view band entries are always exploratory")
     if e["kind"] == "hindcast" and not isinstance(e.get("run_id"), str):
         raise LedgerError("hindcast entries need a run_id")
+
+
+def _bands(e: dict) -> list[str]:
+    """The band an entry states, and the band in the slot ID a score or correction points at."""
+    slot = e.get("claim_id") or e.get("target_id") or ""
+    found = [e.get("band"), slot.split(":")[-2] if slot.count(":") >= 3 else None]
+    return [band for band in found if isinstance(band, str)]
 
 
 # --- file placement and per-file invariants -------------------------------

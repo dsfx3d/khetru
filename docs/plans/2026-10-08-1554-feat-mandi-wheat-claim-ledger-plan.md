@@ -256,6 +256,7 @@ These are owner decisions, made once from U4's base-rate table and U8's power si
   - Candidate bands are the Himachal agro-climatic zones I–III, which hold the rainfed wheat. Each cell joins the band covering most of its district area. Bands that share cells merge into one verdict band (R17).
   - IMD publishes no list of gauges per cell, so the default is one district-wide verdict band.
   - Scoring on the native ENS grid was rejected because observations exist only on the IMD lattice.
+  - **Exploratory view bands (owner-approved 2026-10-11).** An area may be issued and scored beside the verdict bands as a view: a new write-once file `bands/view-<name>.csv` holding its cells, weights that sum to 1, and one band named `view-<name>`. The registered map and its verdict bands are unchanged. A view goes through the same band-mean function and coverage rule, with its own weights; a view of one cell has weight 1 on that cell and stands for the whole cell, since one cell has no boundary to draw. A view is never a verdict band: it has no verdict, no band switch (R17), no hindcast, and no place in any skill figure or pooled check. The first view is the cell 32.00°N, 76.75°E; see `docs/findings/2026-10-foothill-cell-exploratory-view.md`.
 - KTD5. **The probability is a fixed plotting position over the ensemble members.**
   - k is the number of members whose band-mean window total reaches the threshold, out of n members.
   - The bundle names a formula of k and n that never returns 0 or 1, and nothing is fitted to outcomes. This satisfies R4's ensemble path.
@@ -266,6 +267,7 @@ These are owner decisions, made once from U4's base-rate table and U8's power si
     - Claims go in `claims/live.jsonl`, `claims/exploratory.jsonl` or per-run hindcast files, and scores mirror that split under `scores/`.
     - Every entry carries `kind` (`live`, `hindcast`, `exploratory`).
     - `live.jsonl` holds only `live` entries, and `exploratory.jsonl` only `exploratory` entries.
+    - An entry for a view band (KTD4) is always `exploratory`, under any bundle and after any tag; the ledger refuses it under `live` or `hindcast` (owner-approved 2026-10-11).
     - Hindcast entries carry a `run_id` that has a `started` entry.
     - A `live` entry needs its bundle tag as an ancestor of its commit, and an issue date inside that bundle's season (R12).
   - **IDs come from the natural key, never from time or randomness:**
@@ -422,6 +424,7 @@ py/evidence/
     fetch_observations.py # network retrieval for IMD (unfrozen, KTD9)
     claim_core.py     # pure make_claim core (frozen at tag)
     claims.py         # live/exploratory driver (unfrozen)
+    views.py          # the registered map and exploratory view bands, loaded for the drivers (unfrozen)
     score_core.py     # pure score core, Brier, BSS, bootstrap, verdicts, cost-loss (frozen at tag)
     scoring.py        # `evidence score` driver and display aggregates (unfrozen)
     bundle.py         # bundle schema, hash, tag check, power simulation
@@ -626,6 +629,7 @@ docs/findings/        # U1 feasibility finding
   - Every R1 field is present, and the expiry equals the window end from `semantics`.
   - Parity: the same fixture through the live driver and the hindcast driver gives identical claim bodies apart from `kind` and `run_id`.
 - **Verification:** The saved rabi 2026 inputs produce `exploratory` claims for every Monday in the window, each re-derivable from its referenced files.
+- **Deviation (owner-approved 2026-10-11, after the council of that date):** `evidence issue` also writes one claim per exploratory view band (KTD4) for each issue date, and `evidence score` scores it. The claim core, the score core and the band-mean function are the same and are not changed for it; the view lives in the drivers and in `views.py`. A view's entries are `exploratory` even when the bundle issues the verdict bands as `live`, so they are timed by forecast availability. `scoring.standing` leaves a view's scores out.
 
 ### U7. Scoring and statistics
 

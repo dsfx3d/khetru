@@ -15,6 +15,10 @@ pending. ``check`` re-derives every score from the files it names.
 ``standing`` reads a scores file back into what the pass/fail rule needs. It
 refuses a bundle with no recorded tag, so development data never shows skill
 against climatology (KTD11); ``outcomes`` is the count that may always be shown.
+
+An exploratory view (``views``) is scored like a verdict band, with its own
+cell weights. ``registered`` leaves its scores out, and ``standing`` reads
+through it, so a view never adds to skill, episodes or cost-loss values.
 """
 
 import math
@@ -24,7 +28,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path, PurePosixPath
 
-from khetru_evidence import bands, claims, obs_core, observations, score_core, semantics
+from khetru_evidence import bands, claims, obs_core, observations, score_core, semantics, views
 from khetru_evidence import ledger as L
 
 # Fields a driver or the ledger adds around a score body.
@@ -58,6 +62,11 @@ def outcomes(scores: Iterable[dict]) -> Counter[str]:
     return Counter(e["outcome"] for e in current(scores))
 
 
+def registered(scores: Iterable[dict]) -> list[dict]:
+    """The scores of registered bands only; whatever feeds a verdict or a skill figure reads through this."""
+    return views.registered(scores)
+
+
 class _Observed:
     """The saved records of one vintage, and which file holds which date."""
 
@@ -85,11 +94,11 @@ class _Observed:
 
 
 class _Scorer:
-    """What one scoring pass reads: bundles, the band map and observation vintages, each loaded once."""
+    """What one scoring pass reads: bundles, the band files and observation vintages, each loaded once."""
 
     def __init__(self, ledger: L.Ledger, attested: Mapping[str, datetime] | None):
         self.root = ledger.root
-        self.band_map = bands.decode((self.root / bands.BAND_MAP_PATH).read_bytes())
+        self.areas = views.by_band(self.root)
         self.attested = attested or {}
         self._bundles: dict[str, tuple[claims.Bundle, score_core.Rules, Path]] = {}
         self._observed: dict[str, _Observed] = {}
@@ -100,6 +109,12 @@ class _Scorer:
             toml = b.holding("scoring")
             self._bundles[name] = (b, score_core.load_rules(toml), toml)
         return self._bundles[name]
+
+    def area(self, band: str) -> views.Area:
+        """The band file ``band`` is scored with: the registered map, or the view's own file."""
+        if band not in self.areas:
+            raise bands.BandMapError(f"no band {band!r} in the band map or a view")
+        return self.areas[band]
 
     def observed(self, vintage: str) -> _Observed:
         if vintage not in self._observed:
@@ -128,19 +143,20 @@ class _Scorer:
         _, dates = self.window(slot)
         observed, final = self.observed(vintage), self.observed(rules.climatology_vintage)
         share, obs = bundle.coverage_share, bundle.observations
+        area = self.area(slot["band"])
         year = date.fromisoformat(slot["issue_date"]).year
         years = [y for y in observations.full_years(final.series)
                  if y >= obs.climatology_first_year and y != year]
         climatology = obs_core.climatology(
-            final.band(self.band_map, slot["band"], share), dates[0], years=years, days=len(dates),
+            final.band(area.band_map, slot["band"], share), dates[0], years=years, days=len(dates),
             threshold_mm=bundle.rule.threshold_mm, half_window_days=obs.climatology_half_window_days,
             pseudo_count=obs.climatology_pseudo_count,
         )
-        paths = {*bundle.files, scoring_toml, self.root / bands.BAND_MAP_PATH,
+        paths = {*bundle.files, scoring_toml, area.path,
                  *observed.files_holding(dates), *final.files}
         return score_core.score_claim(
             sem=bundle.sem, threshold_mm=bundle.rule.threshold_mm, slot=slot, voided=voided,
-            band=observed.band(self.band_map, slot["band"], share), vintage=vintage, climatology=climatology,
+            band=observed.band(area.band_map, slot["band"], share), vintage=vintage, climatology=climatology,
             timing_test=test, timing_result=result,
             evidence={p.relative_to(self.root).as_posix(): claims.sha256(p) for p in sorted(paths)},
         )
@@ -236,13 +252,16 @@ def is_tagged(ledger: L.Ledger, bundle: str) -> bool:
 
 
 def standing(ledger: L.Ledger, scores_rel: str, bundle: str) -> Standing:
-    """Skill, episode counts and cost-loss values of ``bundle``'s current scores in ``scores_rel``."""
+    """Skill, episode counts and cost-loss values of ``bundle``'s current scores in ``scores_rel``.
+
+    Registered bands only: a view's scores are left out, under any bundle.
+    """
     if not is_tagged(ledger, bundle):
         raise score_core.ScoreError(
             f"bundle {bundle} has no recorded tag; skill against climatology is held back until it has (KTD11)")
     scorer = _Scorer(ledger, None)
     b, rules, _ = scorer.bundle(bundle)
-    scores = [e for e in current(ledger.read(scores_rel)) if e["bundle"] == bundle]
+    scores = [e for e in registered(current(ledger.read(scores_rel))) if e["bundle"] == bundle]
     hindcast = any(e["kind"] == "hindcast" for e in scores)
     by_band: dict[str, list[dict]] = {}
     for e in scores:

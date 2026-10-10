@@ -308,3 +308,33 @@ def test_fails_on_deleted_committed_manifest(repo, stamped, capsys):
 
     assert code == 1
     assert "manifests/" in out.err and "missing" in out.err
+
+
+# --- view bands ---------------------------------------------------------------
+
+VIEW_FILE = "ledger/mandi-wheat/bands/view-east-cell.csv"
+VIEW_BYTES = b"lat,lon,district_km2,weight,verdict_band,reason\n31.50,77.25,100.000,1.000000,view-east-cell,\n"
+
+
+def test_a_new_view_band_file_is_accepted_and_an_edit_to_it_is_not(repo, base, capsys):
+    (repo / VIEW_FILE).parent.mkdir()
+    (repo / VIEW_FILE).write_bytes(VIEW_BYTES)
+    code, out = verify(repo, base, capsys)
+    assert code == 0, out.err
+
+    with_view = commit_all(repo, "add the view")
+    (repo / VIEW_FILE).write_bytes(VIEW_BYTES.replace(b"77.25", b"77.00"))
+    code, out = verify(repo, with_view, capsys)
+    assert code == 1
+    assert VIEW_FILE in out.err and "write-once" in out.err
+
+
+def test_fails_on_a_view_band_entry_that_is_not_exploratory(repo, base, capsys):
+    live = "ledger/mandi-wheat/claims/live.jsonl"
+    entry = claim(date(2027, 10, 18), kind="live", bundle="v1", band="view-east-cell")
+    (repo / live).write_bytes(L.encode({**entry, "recorded_at": "2027-10-18T10:30:00Z"}))
+
+    code, out = verify(repo, base, capsys)
+
+    assert code == 1
+    assert f"{live}:1:" in out.err and "view band entries are always exploratory" in out.err

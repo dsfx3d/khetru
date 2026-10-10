@@ -6,6 +6,10 @@ it with the driver's own fields (``kind``, ``bundle``, ``code``). ``entry`` is
 the one place a body becomes a ledger entry; the hindcast driver (U9) uses it
 too.
 
+An exploratory view (``views``) gets a claim beside each verdict band's, from
+the same core with its own cell weights. Its entries are ``exploratory``
+whatever ``kind`` the verdict bands are issued as.
+
 A slot is written once: issuing a date again writes nothing. ``backfill_missing``
 records ``not_issued`` for slots whose window started with no claim (R10a); it
 never writes a claim. ``check`` re-derives every claim from the files it names.
@@ -16,7 +20,7 @@ import tomllib
 from datetime import date
 from pathlib import Path, PurePosixPath
 
-from khetru_evidence import bands, claim_core, forecasts, obs_core, semantics
+from khetru_evidence import claim_core, forecasts, obs_core, semantics, views
 from khetru_evidence import ledger as L
 
 BUNDLES_DIR = "bundles"
@@ -81,27 +85,33 @@ def entry(body: dict, *, ledger: str, kind: str, bundle: str, code: str, run_id:
 
 
 def bodies(ledger_root: Path, bundle: Bundle, issue_date: date, saved: Path | None) -> list[dict]:
-    """Each verdict band's claim body for ``issue_date``, from the record at ``saved`` if there is one."""
+    """Each verdict band's and each view's claim body for ``issue_date``, from the record at ``saved`` if there is one.
+
+    A body names the one band file it was made from, so no area's claim depends on another's file.
+    """
     root = Path(ledger_root)
-    paths = [*bundle.files, root / bands.BAND_MAP_PATH]
-    band_map = bands.decode((root / bands.BAND_MAP_PATH).read_bytes())
-    record = None
-    if saved is not None:
-        record = forecasts.decode_record(saved.read_bytes())
-        paths.append(saved)
-    evidence = {p.relative_to(root).as_posix(): sha256(p) for p in paths}
-    return [
-        claim_core.make_claim(
-            sem=bundle.sem, rule=bundle.rule, coverage_share=bundle.coverage_share, band_map=band_map,
-            verdict_band=band, issue_date=issue_date, record=record, evidence=evidence,
-        )
-        for band in band_map.verdict_bands
-    ]
+    record = forecasts.decode_record(saved.read_bytes()) if saved is not None else None
+    made = []
+    for band, area in views.by_band(root).items():
+        paths = [*bundle.files, area.path, *([saved] if saved is not None else [])]
+        made.append(claim_core.make_claim(
+            sem=bundle.sem, rule=bundle.rule, coverage_share=bundle.coverage_share, band_map=area.band_map,
+            verdict_band=band, issue_date=issue_date, record=record,
+            evidence={p.relative_to(root).as_posix(): sha256(p) for p in paths},
+        ))
+    return made
+
+
+def _slots(ledger: L.Ledger, kind: str) -> tuple[dict[str, str], set[str]]:
+    """Each band's kind when the verdict bands are issued as ``kind``, and the slot IDs already taken."""
+    kinds = {band: views.kind(band, kind) for band in views.by_band(ledger.root)}
+    taken = {e["id"] for k in sorted(set(kinds.values())) for e in ledger.read(kind_file(k))}
+    return kinds, taken
 
 
 def issue(ledger: L.Ledger, issue_date: date, *, bundle: str, kind: str, code: str,
           source: str = "opendata", abstain_if_missing: bool = False) -> list[dict]:
-    """Append ``issue_date``'s claim for every verdict band that has none; returns what was written.
+    """Append ``issue_date``'s claim for every verdict band and view that has none; returns what was written.
 
     Refuses before the run can be available, and refuses a ``live`` claim once
     its window has started. With no saved record it refuses too, unless
@@ -117,11 +127,9 @@ def issue(ledger: L.Ledger, issue_date: date, *, bundle: str, kind: str, code: s
         raise claim_core.ClaimError(
             f"the {issue_date} window started at {L.timestamp(times.late_cutoff)}; "
             "a live claim is never back-filled (R10a)")
-    rel = kind_file(kind)
-    taken = {e["id"] for e in ledger.read(rel)}
-    band_map = bands.decode((ledger.root / bands.BAND_MAP_PATH).read_bytes())
-    if all(L.slot_id(ledger.name, kind, bundle, band, issue_date.isoformat()) in taken
-           for band in band_map.verdict_bands):
+    kinds, taken = _slots(ledger, kind)
+    if all(L.slot_id(ledger.name, k, bundle, band, issue_date.isoformat()) in taken
+           for band, k in kinds.items()):
         return []
     saved = ledger.root / forecasts.record_path(source, times.run_init)
     if not saved.exists():
@@ -132,27 +140,26 @@ def issue(ledger: L.Ledger, issue_date: date, *, bundle: str, kind: str, code: s
         saved = None
     written = []
     for body in bodies(ledger.root, b, issue_date, saved):
-        new = entry(body, ledger=ledger.name, kind=kind, bundle=bundle, code=code)
+        k = kinds[body["band"]]
+        new = entry(body, ledger=ledger.name, kind=k, bundle=bundle, code=code)
         if new["id"] not in taken:
-            written.append(ledger.append(rel, new))
+            written.append(ledger.append(kind_file(k), new))
     return written
 
 
 def backfill_missing(ledger: L.Ledger, year: int, *, bundle: str, kind: str) -> list[dict]:
     """Append ``not_issued`` for every slot of ``year`` whose window started with no entry (R10a)."""
     b = Bundle(ledger.root, bundle)
-    band_map = bands.decode((ledger.root / bands.BAND_MAP_PATH).read_bytes())
-    rel = kind_file(kind)
-    taken = {e["id"] for e in ledger.read(rel)}
+    kinds, taken = _slots(ledger, kind)
     now = ledger.clock()
     written = []
     for issue_date in semantics.issue_dates(b.sem, year):
         if now < semantics.schedule(b.sem, issue_date).window_start:
             continue
-        for band in band_map.verdict_bands:
-            new = L.not_issued(ledger=ledger.name, kind=kind, bundle=bundle, band=band, issue_date=issue_date)
+        for band, k in kinds.items():
+            new = L.not_issued(ledger=ledger.name, kind=k, bundle=bundle, band=band, issue_date=issue_date)
             if new["id"] not in taken:
-                written.append(ledger.append(rel, new))
+                written.append(ledger.append(kind_file(k), new))
     return written
 
 
