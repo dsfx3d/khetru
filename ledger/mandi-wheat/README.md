@@ -94,6 +94,35 @@ Entries under the `dev` bundle are `exploratory`. Its claim rule values in
 `bundles/dev/claims.toml` are placeholders; the owner chooses the bundle v1
 values at U8. Live entries are written by the GitHub workflows only.
 
+## Scores
+
+`scores/<kind>.jsonl` holds each claim's score against one observation vintage:
+the band's rain on each IMD date of the window, the outcome (`held`,
+`not_held`, or `unverifiable` when a date has no band value), the probability
+that is scored, and climatology's probability for the same window, from the
+final vintage the bundle names with the claim's own season left out. An
+abstain, a `not_issued` slot, a voided claim and a late claim are scored as if
+they had stated climatology's probability. Brier scores are not stored; they
+follow from the outcome and the two probabilities. Each score names the files
+it was made from by SHA-256 under `evidence`.
+
+- `uv run --all-packages evidence score --vintage realtime-r20261028` appends a
+  score for every claim whose window has closed and whose dates the vintage
+  holds. Scoring a claim and vintage again writes nothing. A later vintage
+  appends a score that supersedes the current one and states what changed; the
+  earlier score stays. Real-time observations never replace final ones.
+- `uv run --all-packages evidence score --check` re-derives every score from
+  the files it names and fails if one differs.
+
+The command prints outcomes and counts only. Skill against climatology is read
+through `khetru_evidence.scoring.standing`, which refuses a bundle with no tag
+recorded in `tags.jsonl`, so rabi 2026 development data never shows it. The
+pass/fail rule values in `bundles/dev/scoring.toml` are placeholders; the owner
+chooses the bundle v1 values at U8. A live claim's score waits for the
+OpenTimestamps proof of when it was made; there is no stamping yet (U8), so
+live claims are not scored. Exploratory and hindcast claims are timed by when
+their forecast run was available.
+
 ## Data attribution
 
 Observed rainfall: India Meteorological Department, 0.25° gridded daily

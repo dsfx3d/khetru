@@ -27,3 +27,8 @@ evidence = "khetru_evidence.cli:main"
 [build-system]
 requires = ["uv_build>=0.8.14,<0.9.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "scores>=2.7.0",
+]

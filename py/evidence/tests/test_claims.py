@@ -185,7 +185,7 @@ def test_every_claim_re_derives_from_the_files_it_names(tmp_path):
 
 def test_a_file_added_to_the_bundle_later_leaves_earlier_claims_re_derivable(ledger):
     issue(ledger)
-    (ledger.root / "bundles/dev/scoring.toml").write_text("[scoring]\nseed = 1\n")
+    (ledger.root / "bundles/dev/report.toml").write_text("[report]\ntitle = 1\n")
     assert claims.check(ledger, EXPLORATORY) == []
     assert [p.name for p in claims.Bundle(ledger.root, "dev").files] == [
         "bundle.toml", "claims.toml", "observations.toml"]

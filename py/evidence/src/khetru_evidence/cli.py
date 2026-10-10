@@ -1,4 +1,4 @@
-"""`evidence` command line. Subcommands are added per unit: `verify` (U2), `bands` (U3), `observe` (U4), `archive` and `same-record` (U5), `issue` (U6)."""
+"""`evidence` command line. Subcommands are added per unit: `verify` (U2), `bands` (U3), `observe` (U4), `archive` and `same-record` (U5), `issue` (U6), `score` (U7)."""
 
 import argparse
 import os
@@ -7,7 +7,7 @@ import sys
 from datetime import UTC, date, datetime
 from pathlib import Path, PurePosixPath
 
-from khetru_evidence.ledger import DEV_BUNDLE, MANIFEST_DIR, WRITE_ONCE_DIRS, Ledger
+from khetru_evidence.ledger import DEV_BUNDLE, MANIFEST_DIR, OUTCOMES, WRITE_ONCE_DIRS, Ledger
 
 LEDGERS_DIR = "ledger"
 
@@ -87,6 +87,19 @@ def main(argv: list[str] | None = None) -> int:
     issue_cmd.add_argument("--repo", type=Path, help="repository root (default: current repo)")
     issue_cmd.set_defaults(run=_run_issue)
 
+    score_cmd = commands.add_parser(
+        "score", help="--vintage: append a score against that IMD vintage for every closed claim "
+        "that can take one; --check: re-derive every score"
+    )
+    action = score_cmd.add_mutually_exclusive_group(required=True)
+    action.add_argument("--vintage", help="observation vintage, like realtime-r20261027")
+    action.add_argument("--check", action="store_true")
+    score_cmd.add_argument("--kind", default="exploratory", choices=("exploratory", "live"),
+                           help="--vintage: which claims file to score (default: exploratory)")
+    score_cmd.add_argument("--ledger", default="mandi-wheat")
+    score_cmd.add_argument("--repo", type=Path, help="repository root (default: current repo)")
+    score_cmd.set_defaults(run=_run_score)
+
     args = parser.parse_args(argv)
     return args.run(args)
 
@@ -160,8 +173,7 @@ def _run_issue(args: argparse.Namespace) -> int:
     kind = "exploratory" if args.bundle == DEV_BUNDLE else "live"
     try:
         if args.check:
-            problems = [p for rel in ledger.ledger_files() if PurePosixPath(rel).name == "claims.jsonl"
-                        or PurePosixPath(rel).parts[0] == "claims" for p in claims.check(ledger, rel)]
+            problems = [p for rel in claims.claim_files(ledger) for p in claims.check(ledger, rel)]
             for problem in problems:
                 print(problem, file=sys.stderr)
             print(f"evidence issue: {len(problems)} problem(s)" if problems else "evidence issue: ok")
@@ -184,6 +196,40 @@ def _run_issue(args: argparse.Namespace) -> int:
         print(f"evidence issue: {e['type']} {e['id']}" + (f": {e['statement']}" if "statement" in e else ""))
     if not written:
         print("evidence issue: nothing to write")
+    return 0
+
+
+def _run_score(args: argparse.Namespace) -> int:
+    """Prints outcome labels and counts only: no Brier score or skill, whatever the bundle (KTD11)."""
+    from khetru_evidence import claims, scoring
+
+    repo = _repo_root(args)
+    ledger = Ledger(repo / LEDGERS_DIR / args.ledger)
+    try:
+        if args.check:
+            problems = [p for rel in claims.claim_files(ledger) for p in scoring.check(ledger, rel)]
+            for problem in problems:
+                print(problem, file=sys.stderr)
+            print(f"evidence score: {len(problems)} problem(s)" if problems else "evidence score: ok")
+            return 1 if problems else 0
+        # Live entries are written by the GitHub workflows only (KTD12).
+        if args.kind == "live" and os.environ.get("GITHUB_ACTIONS") != "true":
+            print("evidence score: live entries are never written from a local machine", file=sys.stderr)
+            return 2
+        rel = claims.kind_file(args.kind)
+        code = _git(repo, "rev-parse", "HEAD").decode().strip()
+        written = scoring.score(ledger, rel, vintage=args.vintage, code=code)
+    except ValueError as e:  # score, ledger, record and band-map errors
+        print(f"evidence score: {e}", file=sys.stderr)
+        return 1
+    for e in written:
+        print(f"evidence score: {e['id']}: {e['outcome']}" + (" (provisional)" if e["provisional"] else "")
+              + (f"; {e['reason']}" if "reason" in e else ""))
+    if not written:
+        print("evidence score: nothing to write")
+    counts = scoring.outcomes(ledger.read(scoring.scores_file(rel)))
+    print(f"evidence score: {args.kind} current scores: "
+          + ", ".join(f"{counts[o]} {o}" for o in OUTCOMES))
     return 0
 
 

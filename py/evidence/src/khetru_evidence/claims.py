@@ -14,7 +14,7 @@ never writes a claim. ``check`` re-derives every claim from the files it names.
 import hashlib
 import tomllib
 from datetime import date
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from khetru_evidence import bands, claim_core, forecasts, obs_core, semantics
 from khetru_evidence import ledger as L
@@ -33,15 +33,16 @@ class Bundle:
         self._tomls = sorted(directory.glob("*.toml"))
         if not self._tomls:
             raise claim_core.ClaimError(f"no bundle {name!r} under {directory.parent}")
-        sem, rule, obs = (self._holding(table) for table in ("semantics", "claims", "observations"))
+        sem, rule, obs = (self.holding(table) for table in ("semantics", "claims", "observations"))
         self.sem = semantics.load(sem)
         self.rule = claim_core.load_rule(rule)
-        self.coverage_share = obs_core.load_rules(obs).coverage_share
+        self.observations = obs_core.load_rules(obs)
+        self.coverage_share = self.observations.coverage_share
         # Only the files a claim is made from are its evidence, so a file added
         # to the bundle later leaves earlier claims re-derivable.
         self.files = sorted({sem, rule, obs})
 
-    def _holding(self, table: str) -> Path:
+    def holding(self, table: str) -> Path:
         """The bundle file with ``table``; a bundle may keep its tables in one file or several."""
         found = [p for p in self._tomls if table in tomllib.loads(p.read_text())]
         if len(found) != 1:
@@ -49,12 +50,27 @@ class Bundle:
         return found[0]
 
 
-def _sha256(path: Path) -> str:
+def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def changed_evidence(ledger_root: Path, entry: dict) -> str | None:
+    """The first evidence file of ``entry`` that is missing or no longer has its recorded hash."""
+    for name, recorded in entry["evidence"].items():
+        path = Path(ledger_root) / name
+        if not path.exists() or sha256(path) != recorded:
+            return name
+    return None
 
 
 def kind_file(kind: str) -> str:
     return f"claims/{kind}.jsonl"
+
+
+def claim_files(ledger: L.Ledger) -> list[str]:
+    """Every claims file of the ledger: live, exploratory and each hindcast run's."""
+    return [rel for rel in ledger.ledger_files()
+            if PurePosixPath(rel).name == "claims.jsonl" or PurePosixPath(rel).parts[0] == "claims"]
 
 
 def entry(body: dict, *, ledger: str, kind: str, bundle: str, code: str, run_id: str | None = None) -> dict:
@@ -73,7 +89,7 @@ def bodies(ledger_root: Path, bundle: Bundle, issue_date: date, saved: Path | No
     if saved is not None:
         record = forecasts.decode_record(saved.read_bytes())
         paths.append(saved)
-    evidence = {p.relative_to(root).as_posix(): _sha256(p) for p in paths}
+    evidence = {p.relative_to(root).as_posix(): sha256(p) for p in paths}
     return [
         claim_core.make_claim(
             sem=bundle.sem, rule=bundle.rule, coverage_share=bundle.coverage_share, band_map=band_map,
@@ -146,10 +162,9 @@ def check(ledger: L.Ledger, rel: str) -> list[str]:
     for e in ledger.read(rel):
         if e["type"] not in ("claim", "abstain"):
             continue
-        changed = [name for name, sha in e["evidence"].items()
-                   if not (ledger.root / name).exists() or _sha256(ledger.root / name) != sha]
+        changed = changed_evidence(ledger.root, e)
         if changed:
-            problems.append(f"{e['id']}: evidence file {changed[0]} is missing or changed")
+            problems.append(f"{e['id']}: evidence file {changed} is missing or changed")
             continue
         bundle = Bundle(ledger.root, e["bundle"])
         inputs = [ledger.root / name for name in e["evidence"] if name.startswith(f"{forecasts.INPUTS_DIR}/")]

@@ -246,6 +246,10 @@ These are owner decisions, made once from U4's base-rate table and U8's power si
   - The observed window is the seven IMD rain-days starting at the first 03 UTC after issue. The 3 h offset is documented, not corrected, and is the same on both paths. U1 confirms IMD's date convention.
   - **For claims written in real time (`live`, and `exploratory` runs on the live schedule), on-time is decided by OpenTimestamps, never by `issued_at`, commit dates or runner clocks.** Such a claim is on time only if an upgraded OpenTimestamps proof shows its manifest (KTD6) attested before window start. Until the proof is upgraded, the claim's timing is pending. A late claim is scored as not issued (KTD7).
   - **For `hindcast` claims and retroactive `exploratory` claims, the timing test is forecast availability (R11):** the run's init + 9 h must be at or before the issue time. The bundle tag and the hindcast run entries carry the pre-registration evidence instead. Each score records which timing test it applied.
+  - **What each timing test proves (owner-approved 2026-10-11).** The issue time of a claim that was not written in real time is the time its issue date's own run counts as available, so the forecast-availability test passes when the run the claim names is available no later than that.
+    - `live`: the OpenTimestamps proof shows the claim existed before its window started.
+    - `hindcast`: the forecast-availability test shows only that the claim names a run that was available by its issue date. It does not show when the claim was written. That nothing later was used rests on the as-issued archive, the bundle tag and the run entries.
+    - `exploratory`: the same forecast-availability test, with the same limit. An exploratory claim never enters a verdict.
 - KTD4. **Space semantics.**
   - Everything is computed on the IMD 0.25° lattice. One function in `bands.py` computes area-weighted band means for both forecast and observed fields. Cells are weighted by the area of the district polygon inside them.
   - One coverage rule applies to both fields. Below the bundle's coverage share, a forecast becomes an abstain and an observation becomes `unverifiable`.
@@ -307,7 +311,8 @@ These are owner decisions, made once from U4's base-rate table and U8's power si
   - Code is built and tested only on synthetic fixtures, IMD observations, and forecasts saved from rabi 2026 onward.
   - Pre-2026 Oct–Nov forecast values are never fetched before the tag, from TIGGE or from any open-data mirror.
   - Rabi 2026 is development data, never part of any verdict. It is also where the KTD2 cross-source test runs.
-  - Until bundle v1 is tagged, rabi 2026 exploratory scoring reports only pipeline and integrity results (counts, outcome labels, re-derivability), never Brier or skill against climatology, so no rule value can be chosen from forecast outcomes.
+  - Until bundle v1 is tagged, the project does not compute, report or tune on Brier scores or skill against climatology for rabi 2026. Exploratory scoring reports only pipeline and integrity results (counts, outcome labels, re-derivability), so no rule value can be chosen from forecast outcomes.
+  - This is a rule of conduct, and the entry format is not the safeguard (owner-approved 2026-10-11). A claim publishes its probability and IMD rainfall is public, so anyone can work out a Brier score for a rabi 2026 claim. The code enforces the rule where it can: `evidence score` prints outcomes and counts only, and the skill aggregates refuse a bundle with no recorded tag.
 - KTD12. **Live operations run as GitHub Actions on the public repo, as a single writer.**
   - **Single writer.** The archive and weekly workflows share one `concurrency` group that never cancels a run in progress. When a push is rejected as non-fast-forward, the job drops its local commit, fetches, re-runs its idempotent commands on the new HEAD, and pushes again, a bounded number of times. JSONL is never rebased or merged.
   - **Monday jobs.** The weekly job runs at 10:30 UTC, with retries at 12:30 and 14:30. That leaves at least 9 hours for OpenTimestamps attestation before Tuesday 00 UTC.
@@ -397,7 +402,7 @@ Verdict decision table (KTD8, R13). The numbers come from the bundle.
 |---|---|---|---|
 | Hindcast verdict | independent events < min N (positive or negative) | N met and BSS lower bound > threshold over climatology | N met and lower bound ≤ threshold |
 | Live check, rabi 2027, pooled | otherwise | upper bound of (hindcast BSS − live BSS) < margin | lower bound of (hindcast BSS − live BSS) > margin |
-| STRATEGY gates (R13) | hindcast too early to tell | hindcast pass and live check not fail; provisional while the live check is too early to tell | hindcast fail, or live check fail |
+| STRATEGY gates (R13) | hindcast too early to tell and live check not fail | hindcast pass and live check not fail; provisional while the live check is too early to tell | hindcast fail, or live check fail |
 | Band switch (R17) | independent live episodes accumulated under KTD9 < min N | min N met, pass, and cost-loss value > 0 over the band's C/L range | anything else |
 
 ### Output Structure
@@ -650,6 +655,13 @@ docs/findings/        # U1 feasibility finding
   - Brier and BSS agree with the independent library to 1e-12.
   - Parity: the same claim and vintage scored through the live and hindcast paths give identical score bodies apart from `kind` and `run_id`.
 - **Verification:** The rabi 2026 exploratory claims score end to end, and every number can be re-derived from committed files. Before the tag, the rabi 2026 run prints no Brier or skill figures (KTD11).
+- **Deviations and open items (owner-approved 2026-10-11, after the council of that date, `.scratch/council-transcript-20261011-u7-owner-calls.md`):**
+  - A score entry stores no Brier score. It holds the outcome, the scored probability and climatology's probability, and `score_core.brier_pair` derives the Brier scores from them. This departs from approach step 1.
+  - Each score lists every climatology file by hash under `evidence` until U8 freezes the climatology tables. The field keeps its shape; U8 only shortens the list.
+  - Open for U8: live claims are not scored until OpenTimestamps stamping exists, because their timing test needs the attested time.
+  - Open for U8 and U11: an `exploratory` claim made on the live schedule is timed by forecast availability, not by OpenTimestamps as KTD3 asks. The September 2027 rehearsal needs the OpenTimestamps test.
+  - A claim voided after it was scored keeps its earlier score, and `evidence score --check` then reports it. Nothing writes a void yet.
+  - The band switch reads "pass" as the band's live lower skill bound being above the threshold over climatology, with the minimum N applied to positive and negative episodes each.
 
 ### U8. Pre-registration bundle
 
@@ -660,6 +672,10 @@ docs/findings/        # U1 feasibility finding
 - **Approach:**
   1. Define and validate the bundle schema with every KTD9 field. A bundle with a missing field fails validation.
   2. Run the power simulation: from U4's base rates and episode counts and U1's season count, report the minimum detectable BSS for candidate thresholds and values of N (KTD8), for both the full TIGGE season range and a recent ENS-resolution era (for example from 2016).
+     - **Blocker for the tag (owner-approved 2026-10-11).** The development minimum N of 12 cannot be met as it stands. At 10 mm in 7 days U4 counts 17 positive episodes in 35 seasons, about one every two seasons. TIGGE starts in October 2006, so the hindcast holds about 10 positive episodes and would read "too early to tell" whatever its skill, and a band would need about 25 live seasons.
+     - For each candidate threshold and event the simulation therefore also reports: the expected positive and negative episodes in the hindcast season range; the expected number of live seasons before a band can be judged; and the live check's false-fail rate at the candidate margin and confidence level, because a live-check fail closes the gates (R13).
+     - It compares at least the 7-day event with "rain before the sowing cutoff" (held on 51% of issue dates at 5 mm in U4).
+     - The procedure is written down and committed before the simulation is run. It uses the IMD observations that also decide the outcomes, and no forecast.
   3. The owner makes the choices: start from the tested `bundles/dev` values, then fix the threshold, window, hindcast season range, threshold over climatology, minimum N, margin, confidence level, C/L range, settlement date, and STRATEGY consequences. Each one goes into `bundle.toml` with a one-line reason.
   4. Freeze the leave-one-season-out and live climatology tables and the IMD final file hashes.
   5. `evidence bundle freeze` hashes, tags, and stamps the bundle, and the owner pushes. `evidence stamp upgrade` completes pending proofs.

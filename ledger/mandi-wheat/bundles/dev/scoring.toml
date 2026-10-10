@@ -1,0 +1,30 @@
+# Development bundle, scoring and pass/fail rule: untagged placeholders for
+# building and testing U7. The owner chooses every value for bundles/v1/ at U8,
+# with the power simulation. A separate file because bundles/ is write-once.
+
+[scoring]
+# IMD final vintage the climatology probability is computed from. A claim's own
+# season is always left out. U8 replaces this with frozen tables.
+climatology_vintage = "final-r20261010"
+
+# Pass needs the lower confidence bound of the Brier skill score against
+# climatology to be above skill_threshold (R13).
+skill_threshold = 0.0
+
+# Minimum independent rain episodes, positive and negative each (R10, KTD8).
+min_episodes = 12
+
+# Two-sided confidence level of the bootstrap intervals.
+confidence = 0.9
+
+# Live check (R13): pass when the upper bound of (hindcast skill - live skill)
+# is below the margin, fail when the lower bound is above it.
+noninferiority_margin = 0.1
+
+# Cluster bootstrap (KTD8): whole seasons for the hindcast, issue dates for a
+# live season.
+bootstrap_seed = 20261008
+bootstrap_resamples = 10000
+
+# Cost-loss ratios the relative economic value must be above zero at (KTD13).
+cost_loss_ratios = [0.08, 0.2, 0.34]
