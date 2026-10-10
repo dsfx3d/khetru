@@ -35,6 +35,7 @@ The code is `py/evidence/src/khetru_evidence/bundle.py`, run by `uv run --all-pa
 | Confidence level (two-sided) | 0.8, 0.9, 0.95 |
 | Live-check margin | 0.05, 0.1, 0.2 |
 | True skill (BSS against climatology) | 0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5 |
+| Forecast errors within a season | independent; shared |
 
 2006 is counted with and without, because U1 could not confirm that TIGGE covers its whole window. The threshold over climatology stays at the development value of 0; it is not varied.
 
@@ -49,17 +50,19 @@ The code is `py/evidence/src/khetru_evidence/bundle.py`, run by `uv run --all-pa
 
 1. **Episodes in each season range.** For each event, threshold and counted range: issue dates, held dates, base rate, positive and negative episodes, and the largest candidate minimum N that both counts reach. This is a count, not a simulation. The hindcast's N is known from observations alone, so it shows at once which minimum N a hindcast range can meet.
 2. **Live seasons until a band can be judged.** For each event, threshold and minimum N: draw seasons with replacement from the 35 observed seasons, adding their episode counts, until positive and negative episodes both reach N. Repeat 1000 times; report the median and the 90th percentile of the number of seasons. A row that does not get there in 200 seasons in 90% of draws reads "over 200".
-3. **Simulated forecasts.** Outcomes are the observed ones. For a true skill `s`, each issue date's forecast is drawn from the Beta distribution a calibrated forecaster would have, given the outcome. With climatology `c` and `v = (1 − s) / s`: Beta(c·v + 1, (1 − c)·v) when the event held, Beta(c·v, (1 − c)·v + 1) when it did not. These forecasts are reliable, and their expected BSS against climatology is `s`. Draws are independent between issue dates.
-4. **Hindcast pass rate and minimum detectable skill.** For each event, threshold, simulated range and true skill, make 1000 simulated hindcasts. Each is judged by `score_core.skill` (cluster bootstrap over seasons, 2000 resamples, the bundle seed) and `score_core.hindcast_verdict`, with N taken as met, at each confidence level. Report the share that pass. The minimum detectable skill is the smallest candidate skill that passes at least 80% of the time.
-5. **Live check.** Each simulated hindcast is paired with one live season drawn from the 35 observed seasons, and `score_core.skill_difference` and `score_core.live_check` are read at each confidence level and margin, for two live seasons:
+3. **Simulated forecasts.** Outcomes are the observed ones. For a true skill `s`, each issue date's forecast is drawn from the Beta distribution a calibrated forecaster would have, given the outcome. With climatology `c` and `v = (1 − s) / s`: Beta(c·v + 1, (1 − c)·v) when the event held, Beta(c·v, (1 − c)·v + 1) when it did not. These forecasts are reliable, and their expected BSS against climatology is `s`. A season's draws are made in two ways, each with its own rows:
+   - **independent:** each issue date has its own draw.
+   - **shared:** one uniform draw per season says how good its forecasts are. Each issue date takes that quantile of its own Beta distribution, counted from the top when the event held and from the bottom when it did not. A season's forecasts are then all as good or as bad as one another, and each forecast keeps the distribution it has when drawn independently, so reliability and the expected BSS are unchanged. Seasons stay independent of one another.
+4. **Hindcast pass rate and minimum detectable skill.** For each event, threshold, simulated range, true skill and kind of errors, make 1000 simulated hindcasts. Each is judged by `score_core.skill` (cluster bootstrap over seasons, 2000 resamples, the bundle seed) and `score_core.hindcast_verdict`, with N taken as met, at each confidence level. Report the share that pass. The minimum detectable skill is the smallest candidate skill that passes at least 80% of the time.
+5. **Live check.** Each simulated hindcast is paired with one live season drawn from the 35 observed seasons, with the same kind of errors, and `score_core.skill_difference` and `score_core.live_check` are read at each confidence level and margin, for two live seasons:
    - one with the hindcast's true skill. Its fail rate is the false-fail rate; its pass rate is also reported.
    - one that states climatology (skill exactly 0). Its fail rate is how often the check catches a live season with no skill.
 
-Every random draw comes from numpy's generator seeded with the bundle seed and the row's position (band, event, threshold, range, skill or minimum N). The same files and seed give the same `power.md`; `evidence bundle power --check` exits 1 unless the committed table matches. The run takes about 7 minutes on 12 cores.
+Every random draw comes from numpy's generator seeded with the bundle seed and the row's position (band, event, threshold, range, skill and kind of errors, or minimum N). The same files and seed give the same `power.md`; `evidence bundle power --check` exits 1 unless the committed table matches. The run takes about 15 minutes on 12 cores.
 
 ## Limits to read the output with
 
-- **Forecast errors are drawn independently between issue dates.** Real errors in one season are likely to be related, most of all for the cutoff event, where one rain decides several issue dates. The bootstrap resamples whole seasons, which covers related outcomes, but the simulated pass rates are likely too high and the minimum detectable skill too low.
+- **Real forecast errors lie between the two kinds simulated.** Errors in one season are likely to be related, most of all for the cutoff event, where one rain decides several issue dates. The independent rows are an upper bound on power and the shared rows a lower bound. Shared errors assume a season is good or bad as a whole; errors shared by only some of a season's issue dates are not simulated.
 - **Simulated forecasts are perfectly reliable.** A real forecast with the same resolution but poor reliability scores lower.
 - **The live season is one season drawn from the past 35.** A live check pooled over more seasons is not simulated.
 - **The cutoff event looks up to 45 days ahead.** The ENS run reaches 15 days and the development claim rule covers steps 24–192 h. The simulation says how well a forecast of that event could be judged, not whether one can be made. Choosing it needs a new claim rule.
@@ -70,7 +73,8 @@ Every random draw comes from numpy's generator seeded with the bundle seed and t
 
 1. Whether these candidates are the ones to simulate. Adding one after the run is a change to this procedure.
 2. Whether the episode rule for the cutoff event (at most one positive and one negative per season) is the one to count with.
-3. Whether to accept independent forecast errors, read as an upper bound on power, or to add a second set of rows with errors shared within a season before the run.
+
+Decided by the owner on 2026-10-11, before the run: rows with errors shared within a season are added beside the independent ones (step 3).
 
 ## Changes after the run
 

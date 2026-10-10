@@ -130,7 +130,7 @@ candidate event and threshold, the rain episodes in each hindcast season range,
 the live seasons until a band can be judged, how often a hindcast of a given
 true skill would pass, and how often the live check would fail or pass. It
 reads the IMD final observations and no forecast; forecasts are simulated at a
-stated skill. With `--check` it fails unless the committed table matches. The
+stated skill, with a season's errors independent and again shared. With `--check` it fails unless the committed table matches. The
 procedure is `docs/findings/2026-10-mandi-power-simulation-procedure.md`, and
 it is committed before the first run, so `power.md` does not exist until the
 owner has accepted it. The owner chooses the bundle v1 values from the table at

@@ -11,8 +11,11 @@ each issue date from the Beta distribution a calibrated forecaster would have
 given that outcome: with climatology ``c`` and ``v = (1 - s) / s``, a held
 window draws from Beta(c v + 1, (1 - c) v) and one that did not hold from
 Beta(c v, (1 - c) v + 1). Such forecasts are reliable and their expected Brier
-skill score against climatology is ``s``. Every verdict is then read with the
-``score_core`` functions the real record will use.
+skill score against climatology is ``s``. The draws of a season are made twice
+over: independent of one another, and ``shared``, where one draw decides how
+good every forecast of the season is. Real forecast errors lie between the two.
+Every verdict is then read with the ``score_core`` functions the real record
+will use.
 """
 
 import dataclasses
@@ -28,12 +31,16 @@ from datetime import date, timedelta
 from pathlib import Path
 
 import numpy as np
+from scipy.special import betaincinv
 
 from khetru_evidence import bands, obs_core, observations, score_core, semantics
 
 POWER_PATH = "power.md"
 WINDOW, BEFORE_CUTOFF = "window", "before_cutoff"
 EVENTS = (WINDOW, BEFORE_CUTOFF)
+# How a season's simulated forecast errors relate to one another.
+INDEPENDENT, SHARED = "independent", "shared"
+ERRORS = (INDEPENDENT, SHARED)
 
 
 @dataclass(frozen=True)
@@ -74,7 +81,7 @@ class Season:
 
 @dataclass(frozen=True)
 class Power:
-    """What ``replicates`` simulated records gave for one event, threshold, range and true skill."""
+    """What ``replicates`` simulated records gave for one event, threshold, range, true skill and errors."""
 
     replicates: int
     passes: Mapping[float, int]  # confidence -> hindcasts whose lower skill bound passes
@@ -169,14 +176,30 @@ def episodes(seasons: Sequence[Season]) -> tuple[int, int]:
 # --- simulated records --------------------------------------------------------
 
 
-def draw_forecasts(rng: np.random.Generator, slots: Sequence[Slot], skill: float) -> list[float]:
-    """A calibrated forecast of expected skill ``skill`` for each slot, given its outcome."""
+def draw_forecasts(rng: np.random.Generator, slots: Sequence[Slot], skill: float,
+                   errors: str = INDEPENDENT) -> list[float]:
+    """A calibrated forecast of expected skill ``skill`` for each slot, given its outcome.
+
+    With ``shared`` errors one draw per season says how good its forecasts are:
+    each slot takes that quantile of its own distribution, counted from the
+    wrong end, so a season's forecasts are all as good or as bad as one another.
+    Each forecast keeps the distribution it has when drawn independently.
+    """
     if not 0 < skill < 1:
         raise ValueError("a simulated skill must be inside 0-1")
     spread = (1 - skill) / skill
     c = np.array([s.climatology for s in slots])
     held = np.array([s.outcome == obs_core.HELD for s in slots], dtype=float)
-    return rng.beta(c * spread + held, (1 - c) * spread + 1 - held).tolist()
+    a, b = c * spread + held, (1 - c) * spread + 1 - held
+    if errors == INDEPENDENT:
+        return rng.beta(a, b).tolist()
+    if errors != SHARED:
+        raise ValueError(f"unknown errors {errors!r}")
+    seasons = sorted({s.issue_date[:4] for s in slots})
+    quality = dict(zip(seasons, rng.random(len(seasons))))
+    good = np.array([quality[s.issue_date[:4]] for s in slots])
+    # A good forecast is high when the event held and low when it did not.
+    return betaincinv(a, b, np.where(held == 1, good, 1 - good)).tolist()
 
 
 def rows(slots: Sequence[Slot], probabilities: Sequence[float]) -> list[score_core.Row]:
@@ -187,8 +210,8 @@ def rows(slots: Sequence[Slot], probabilities: Sequence[float]) -> list[score_co
     )
 
 
-def simulate(hindcast: Sequence[Season], pool: Sequence[Season], skill: float, rules: score_core.Rules,
-             design: Design, rng: np.random.Generator) -> Power:
+def simulate(hindcast: Sequence[Season], pool: Sequence[Season], skill: float, errors: str,
+             rules: score_core.Rules, design: Design, rng: np.random.Generator) -> Power:
     """Simulated hindcasts over ``hindcast``, each with one live season drawn from ``pool``.
 
     The hindcast and the first live season both have true skill ``skill``; the
@@ -201,9 +224,9 @@ def simulate(hindcast: Sequence[Season], pool: Sequence[Season], skill: float, r
     live_equal = {key: Counter() for key in keys}
     live_none = {key: Counter() for key in keys}
     for _ in range(design.replicates):
-        hindcast_rows = rows(slots, draw_forecasts(rng, slots, skill))
+        hindcast_rows = rows(slots, draw_forecasts(rng, slots, skill, errors))
         live = pool[rng.integers(len(pool))].slots
-        equal_rows = rows(live, draw_forecasts(rng, live, skill))
+        equal_rows = rows(live, draw_forecasts(rng, live, skill, errors))
         none_rows = rows(live, [s.climatology for s in live])
         for confidence in design.confidences:
             at = dataclasses.replace(rules, confidence=confidence, bootstrap_resamples=design.bootstrap_resamples)
@@ -301,14 +324,15 @@ def power(ledger_root: Path, design: Design = Design()) -> str:
         band = obs_core.band_daily(series, band_map, verdict_band, obs_rules.coverage_share)
         pools = {(e, t): observed_seasons(band, years, sem, obs_rules, event, threshold)
                  for e, event in enumerate(EVENTS) for t, threshold in enumerate(design.thresholds_mm)}
-        # One job per event, threshold, season range and true skill, each with its own seed, so the
-        # table does not depend on how many processes share the work.
+        # One job per event, threshold, season range, true skill and kind of errors, each with its
+        # own seed, so the table does not depend on how many processes share the work.
         jobs = {
-            (e, t, r, k): ([s for s in pool if s.year >= first], pool, skill, rules, design,
-                           [rules.bootstrap_seed, 1, b, e, t, r, k])
+            (e, t, r, k, x): ([s for s in pool if s.year >= first], pool, skill, errors, rules, design,
+                              [rules.bootstrap_seed, 1, b, e, t, r, k, x])
             for (e, t), pool in pools.items()
             for r, first in enumerate(design.simulated_first_years)
             for k, skill in enumerate(design.skills)
+            for x, errors in enumerate(ERRORS)
         }
         with ProcessPoolExecutor() as workers:
             results = dict(zip(jobs, workers.map(_simulate_seeded, jobs.values())))
@@ -350,26 +374,26 @@ def _event_tables(event, key, pools, results, sem, cutoff, rules, design) -> lis
 
         for r, first in enumerate(design.simulated_first_years):
             seasons = ranges[first]
-            by_skill = {skill: results[e, t, r, k] for k, skill in enumerate(design.skills)}
-            for confidence in design.confidences:
-                rates = {skill: p.passes[confidence] / p.replicates for skill, p in by_skill.items()}
-                least = minimum_detectable(rates, design.power_target)
-                passing.append(
-                    f"| {_mm(threshold)} | {_range(seasons)} | {confidence:g} | "
-                    + " | ".join(f"{100 * rate:.0f}%" for rate in rates.values())
-                    + f" | {'above ' + format(max(design.skills), 'g') if least is None else format(least, 'g')} |"
-                )
-                for margin in design.margins:
-                    cells = [
-                        " / ".join(_pct(tally[verdict], p.replicates) for tally, verdict in (
-                            (p.live_equal[confidence, margin], score_core.FAIL),
-                            (p.live_equal[confidence, margin], score_core.PASS),
-                            (p.live_none[confidence, margin], score_core.FAIL),
-                        ))
-                        for p in by_skill.values()
-                    ]
-                    live.append(f"| {_mm(threshold)} | {_range(seasons)} | {confidence:g} | {margin:g} | "
-                                + " | ".join(cells) + " |")
+            for x, errors in enumerate(ERRORS):
+                by_skill = {skill: results[e, t, r, k, x] for k, skill in enumerate(design.skills)}
+                for confidence in design.confidences:
+                    row = f"| {_mm(threshold)} | {_range(seasons)} | {errors} | {confidence:g} | "
+                    rates = {skill: p.passes[confidence] / p.replicates for skill, p in by_skill.items()}
+                    least = minimum_detectable(rates, design.power_target)
+                    passing.append(
+                        row + " | ".join(f"{100 * rate:.0f}%" for rate in rates.values())
+                        + f" | {'above ' + format(max(design.skills), 'g') if least is None else format(least, 'g')} |"
+                    )
+                    for margin in design.margins:
+                        cells = [
+                            " / ".join(_pct(tally[verdict], p.replicates) for tally, verdict in (
+                                (p.live_equal[confidence, margin], score_core.FAIL),
+                                (p.live_equal[confidence, margin], score_core.PASS),
+                                (p.live_none[confidence, margin], score_core.FAIL),
+                            ))
+                            for p in by_skill.values()
+                        ]
+                        live.append(row + f"{margin:g} | " + " | ".join(cells) + " |")
 
     title = (f"Rain in the {sem.rain_days}-day window" if event == WINDOW
              else f"Next rain before the sowing cutoff ({cutoff})")
@@ -391,14 +415,16 @@ def _event_tables(event, key, pools, results, sem, cutoff, rules, design) -> lis
         "|---|---|---|" + "---|" * len(design.min_episodes), *until, "",
         "#### Hindcast pass rate by true skill", "",
         "Share of simulated hindcasts whose lower skill bound passes, with N taken as met. The",
-        f"minimum detectable skill is the smallest that passes at least {design.power_target:.0%} of the time.", "",
-        f"| Threshold | Seasons | Confidence | {skills} | Minimum detectable |",
-        "|---|---|---|" + columns + "---|", *passing, "",
+        f"minimum detectable skill is the smallest that passes at least {design.power_target:.0%} of the time.",
+        "A season's forecast errors are drawn independently, or shared so that its forecasts are",
+        "all as good or as bad as one another; real errors lie between the two.", "",
+        f"| Threshold | Seasons | Errors | Confidence | {skills} | Minimum detectable |",
+        "|---|---|---|---|" + columns + "---|", *passing, "",
         "#### Live check by true hindcast skill", "",
         "One live season drawn from every season. Each cell is: fails when the live season has the",
         "hindcast's skill (a false fail) / passes then / fails when the live season states climatology.", "",
-        f"| Threshold | Seasons | Confidence | Margin | {skills} |",
-        "|---|---|---|---|" + columns, *live, "",
+        f"| Threshold | Seasons | Errors | Confidence | Margin | {skills} |",
+        "|---|---|---|---|---|" + columns, *live, "",
     ]
 
 

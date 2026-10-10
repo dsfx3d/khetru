@@ -582,6 +582,7 @@ dependencies = [
     { name = "eccodeslib", marker = "sys_platform != 'win32'" },
     { name = "ecmwf-opendata" },
     { name = "numpy" },
+    { name = "scipy" },
 ]
 
 [package.optional-dependencies]
@@ -606,6 +607,7 @@ requires-dist = [
     { name = "imdlib", marker = "extra == 'obs'", specifier = ">=0.3.1" },
     { name = "numpy", specifier = ">=2.5.3" },
     { name = "rasterio", marker = "extra == 'geo'", specifier = ">=1.4" },
+    { name = "scipy", specifier = ">=1.18.1" },
 ]
 provides-extras = ["geo", "obs"]
 

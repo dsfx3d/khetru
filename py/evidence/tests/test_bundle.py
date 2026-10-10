@@ -100,13 +100,31 @@ def test_simulated_forecasts_have_the_stated_skill():
     slots = [bundle.Slot(f"{2000 + i // 5}-10-{i % 5 + 1:02d}", O.HELD if h else O.NOT_HELD, 0.2)
              for i, h in enumerate(held)]
 
-    for skill in (0.1, 0.4):
-        forecasts = bundle.draw_forecasts(rng, slots, skill)
+    for skill, errors in ((0.1, bundle.INDEPENDENT), (0.4, bundle.INDEPENDENT), (0.1, bundle.SHARED),
+                          (0.4, bundle.SHARED)):
+        forecasts = bundle.draw_forecasts(rng, slots, skill, errors)
         assert all(0 < p < 1 for p in forecasts)
         assert S.bss(bundle.rows(slots, forecasts)) == pytest.approx(skill, abs=0.02)
         # Reliable: the event held about as often as forecasts near 0.5 said.
         near = [h for h, p in zip(held, forecasts) if 0.4 < p < 0.6]
         assert not near or np.mean(near) == pytest.approx(0.5, abs=0.1)
+
+
+def test_shared_errors_make_a_season_all_good_or_all_bad():
+    rng = np.random.default_rng(2)
+    slots = [bundle.Slot(f"{2000 + i // 5}-10-{i % 5 + 1:02d}", O.HELD if i % 5 == 0 else O.NOT_HELD, 0.2)
+             for i in range(10_000)]
+
+    def spread_between_seasons(errors):
+        table = bundle.rows(slots, bundle.draw_forecasts(rng, slots, 0.3, errors))
+        return np.var([np.mean([r.brier for r in table[i:i + 5]]) for i in range(0, len(table), 5)])
+
+    assert spread_between_seasons(bundle.SHARED) > 2 * spread_between_seasons(bundle.INDEPENDENT)
+    # One season, shared: the not-held dates share a climatology, so they get one forecast.
+    shared = bundle.draw_forecasts(rng, slots[:5], 0.3, bundle.SHARED)
+    assert len({round(p, 12) for p in shared[1:]}) == 1
+    with pytest.raises(ValueError, match="unknown errors"):
+        bundle.draw_forecasts(rng, slots[:5], 0.3, "paired")
 
 
 def test_a_simulated_skill_must_be_inside_0_and_1():
@@ -118,8 +136,8 @@ def test_a_simulated_skill_must_be_inside_0_and_1():
 def test_simulation_repeats_for_a_seed_and_tallies_every_record(rules):
     pool = [season(1, 1, year) for year in range(2000, 2020)]
 
-    def run(seed, skill=0.5):
-        return bundle.simulate(pool, pool, skill, rules, SMALL, np.random.default_rng(seed))
+    def run(seed, skill=0.5, errors=bundle.INDEPENDENT):
+        return bundle.simulate(pool, pool, skill, errors, rules, SMALL, np.random.default_rng(seed))
 
     first = run(7)
     assert first == run(7)
@@ -130,6 +148,7 @@ def test_simulation_repeats_for_a_seed_and_tallies_every_record(rules):
     assert first.passes[0.9] == 20
     assert first.live_none[0.9, 0.1][S.PASS] == 0
     assert run(7, skill=0.05).passes[0.9] < 20
+    assert run(7, errors=bundle.SHARED) != first
 
 
 def test_seasons_until_judged_counts_both_kinds_of_episode():
@@ -165,6 +184,7 @@ def test_power_table_reproduces_from_the_same_files_and_seed(tmp_path):
     assert "| 10 mm | 1991–2003 | 3 | 12 | 2 | 17% | 1 | 3 | 1 |" in text
     assert "No real forecast enters this table." in text
     assert text.count("#### Hindcast pass rate by true skill") == 2
+    assert text.count("| 10 mm | 2002–2003 | shared | 0.9 | ") == 4  # a pass row and a live row per event
 
 
 def test_power_check_fails_when_the_table_was_edited(tmp_path, capsys):
