@@ -68,6 +68,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # The branch head, not the trigger commit: a run that waited in the
+          # concurrency group must see what the runs before it pushed.
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
           fetch-tags: true
 
@@ -124,7 +127,9 @@ jobs:
             git reset --hard FETCH_HEAD
             (cd "$PENDING" && find . -type f) | while read -r f; do
               if [ -e "$f" ]; then
-                cmp -s "$PENDING/$f" "$f" || { echo "$f differs on the remote; write-once conflict"; exit 1; }
+                # The same run from another mirror differs only in source_url; the remote copy stays.
+                cmp -s "$PENDING/$f" "$f" || evidence same-record "$PENDING/$f" "$f" \
+                  || { echo "$f differs on the remote; write-once conflict"; exit 1; }
               else
                 mkdir -p "$(dirname "$f")"; cp "$PENDING/$f" "$f"
               fi

@@ -300,6 +300,19 @@ def decode_record(data: bytes) -> dict:
     return record
 
 
+def same_run(a: bytes, b: bytes) -> bool:
+    """Whether two encoded records hold the same run, whichever mirror served it.
+
+    Mirrors serve the same GRIB bytes, so only ``source_url`` may differ. A copy
+    that does not decode never matches.
+    """
+    try:
+        first, second = decode_record(a), decode_record(b)
+    except RecordError:
+        return False
+    return encode({**first, "source_url": ""}) == encode({**second, "source_url": ""})
+
+
 def record_path(source: str, init: datetime) -> str:
     return f"{INPUTS_DIR}/ens-{source}-{init.astimezone(UTC):%Y%m%d%H}.json.gz"
 

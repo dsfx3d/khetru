@@ -1,4 +1,4 @@
-"""`evidence` command line. Subcommands are added per unit: `verify` (U2), `archive` (U5)."""
+"""`evidence` command line. Subcommands are added per unit: `verify` (U2), `archive` and `same-record` (U5)."""
 
 import argparse
 import subprocess
@@ -39,6 +39,12 @@ def main(argv: list[str] | None = None) -> int:
     archive_cmd.add_argument("--repo", type=Path, help="repository root (default: current repo)")
     archive_cmd.set_defaults(run=_run_archive)
 
+    same_cmd = commands.add_parser(
+        "same-record", help="exit 0 if two saved records hold the same run, whichever mirror served it"
+    )
+    same_cmd.add_argument("records", type=Path, nargs=2, metavar="RECORD")
+    same_cmd.set_defaults(run=_run_same_record)
+
     args = parser.parse_args(argv)
     return args.run(args)
 
@@ -71,6 +77,13 @@ def _run_archive(args: argparse.Namespace) -> int:
     day = args.date or datetime.now(UTC).date()
     hours = sorted(set(args.hours)) if args.hours else fetch_forecasts.RUN_HOURS
     return fetch_forecasts.archive(day, hours, repo=repo, source=args.source)
+
+
+def _run_same_record(args: argparse.Namespace) -> int:
+    from khetru_evidence import forecasts
+
+    first, second = (path.read_bytes() for path in args.records)
+    return 0 if forecasts.same_run(first, second) else 1
 
 
 def verify(repo: Path, base: str) -> list[str]:
