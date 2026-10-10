@@ -32,10 +32,10 @@ the 00 and 12 UTC open-data runs from 1 Oct to 30 Nov.
 ## Band map
 
 `bands/band-map.csv` lists every IMD 0.25° lattice cell holding part of Mandi
-district: the cell's share of the district's area (`weight`), the elevation
-band covering most of that part, and the verdict band it reports to. There is
-one verdict band, `district`, because no independent gauges stand behind
-separate bands (R17). `khetru_evidence.bands.band_mean` turns a forecast or
+district: the cell's share of the district's area (`weight`) and the verdict
+band it reports to. There is one verdict band, `district`, because no
+independent gauges stand behind separate bands (R17). Elevation zones are not
+registered; `docs/findings/2026-10-mandi-elevation-zones.md` says why. `khetru_evidence.bands.band_mean` turns a forecast or
 observed field into the band value with these weights and one coverage rule.
 `bands/PROVENANCE.md` names the sources, their hashes and the method;
 `uv run --all-packages evidence bands build` (needs `uv sync --all-extras`)

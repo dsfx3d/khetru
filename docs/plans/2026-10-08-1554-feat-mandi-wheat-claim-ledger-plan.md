@@ -554,6 +554,7 @@ docs/findings/        # U1 feasibility finding
   - A cell outside the polygon gets weight 0.
   - With a band below the coverage share, the band-mean function reports insufficient coverage, and the result is the same whether the input is a forecast field or an observed field.
 - **Verification:** Rebuilding from the recorded sources reproduces `band-map.csv` byte for byte.
+- **Deviation (owner-approved 2026-10-10):** `band-map.csv` maps cells to weights and verdict bands only. It holds no band column and registers no zone edges, because they change no score and the published edges disagree. The code still classifies elevation and merges bands that share cells. See `docs/findings/2026-10-mandi-elevation-zones.md`.
 
 ### U4. Observations, climatology, base rates
 

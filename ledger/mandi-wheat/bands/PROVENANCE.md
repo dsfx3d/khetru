@@ -1,8 +1,11 @@
 # Band map provenance
 
-`band-map.csv` maps IMD 0.25° lattice cells to elevation bands and verdict
-bands for Mandi district (plan unit U3, KTD4, R17). It is write-once. Built on
+`band-map.csv` maps IMD 0.25° lattice cells to their share of Mandi district
+and to verdict bands (plan unit U3, KTD4, R17). It is write-once. Built on
 2026-10-10.
+
+**Elevation zones are not registered.** The file holds no zone or band column,
+and no zone edges are fixed by it. See "Elevation zones" below.
 
 ## Rebuild
 
@@ -17,7 +20,7 @@ prints `reproduced ... byte for byte` and exits 0 when the result equals the
 committed file, and exits 1 when it differs. Checked on 2026-10-10 from an empty
 cache.
 
-- `band-map.csv` SHA-256: `2a1cc9671e3f4ff05be3b57001ff07eb019d98fd9cda5b90e59c10d5ab051741`
+- `band-map.csv` SHA-256: `3b7d40b946de3cb7053954a77801f3d22e2d1935470ef66f930ae8b52a02763d`
 - Built with Python 3.13, numpy 2.5.3, rasterio 1.5.2 (GDAL 3.12.2), as pinned in `uv.lock`.
 
 ## Sources
@@ -51,41 +54,29 @@ Attribution: produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and
 © Airbus Defence and Space GmbH 2014-2018, provided under COPERNICUS by the
 European Union and ESA; all rights reserved.
 
-### Elevation bands
-
-The Himachal Pradesh agro-climatic zones as published by the state Department
-of Agriculture (https://agriculture.hp.gov.in/?p=3940, read 2026-10-10):
-
-| Band | Zone | Elevation |
-|---|---|---|
-| `zone-1` | Sub-tropical sub-montane and low hills | up to 1000 m |
-| `zone-2` | Sub-humid mid hills | 1001–1500 m |
-| `zone-3` | Wet temperate high hills | 1501–2500 m |
-| `zone-4` | Dry temperate high hills (not a candidate band) | above 2500 m |
-
-Two choices were made here:
-
-- The page gives zone 3 two upper edges: 2500 m where rainfall is at most 1500 mm and 3250 m where it is more. 2500 m is used.
-- Other sources give other edges. The edges often cited from CSK HPKV are 650, 1800 and 2200 m; no primary source for them was found on 2026-10-10.
-
-Neither choice changes the verdict bands below. They change only the `band` and
-`zone_*` columns.
-
 ## Method
 
 1. Each DEM pixel whose centre lies inside the polygon counts as district area. Its area is computed on the WGS84 ellipsoid.
-2. A pixel belongs to the 0.25° cell holding its centre and to the zone holding its elevation. Upper edges are inclusive.
-3. A cell's `weight` is its share of the district's area. Its `band` is the zone covering most of its district area.
-4. Candidate bands (zones 1–3) that both have area in one cell share that cell's observation and merge into one verdict band (R17).
-5. Bands count as independent only when distinct gauges stand behind them. IMD publishes no list of gauges per cell, so the map is built without gauge evidence and has one verdict band, `district`.
+2. A pixel belongs to the 0.25° cell holding its centre.
+3. A cell's `weight` is its share of the district's area.
+4. Bands count as independent only when distinct gauges stand behind them (R17). IMD publishes no list of gauges per cell, so the map is built without gauge evidence and has one verdict band, `district`.
+
+## Elevation zones
+
+The build also sorts each pixel into an elevation zone, because bands that
+share a cell must merge (R17). The zones do not reach this file: with no gauge
+evidence the map is district-wide whatever the zones are.
+
+`docs/findings/2026-10-mandi-elevation-zones.md` records the owner's decision
+of 2026-10-10 to leave zones out, the published zone edges that were compared,
+and the result: one verdict band under each of them. A zone scheme, if one is
+ever registered, goes in a new file here.
 
 ## Result
 
 - 14 cells hold district area. 10 hold 1% or more of it. This matches the U1 finding.
 - District area: 3954.3 km², against the official 3950 km².
-- District area by zone: zone 1 20.3%, zone 2 33.0%, zone 3 37.9%, zone 4 8.8%.
 - **One verdict band, `district`. Reason recorded in the file: `no-independent-gauges`.**
-- The map would be one band even with gauge evidence. Each of the 10 larger cells holds at least two candidate zones, and most hold all three, so merging shared cells already joins zones 1–3.
 
 ## Columns
 
@@ -94,8 +85,6 @@ Neither choice changes the verdict bands below. They change only the `band` and
 | `lat`, `lon` | Cell centre in degrees |
 | `district_km2` | District area inside the cell |
 | `weight` | That area as a share of the district; the band-mean weight |
-| `zone_1` … `zone_4` | Share of the cell's district area in each zone |
-| `band` | The zone with the largest share |
 | `verdict_band` | The band the cell reports to |
 | `reason` | Why the verdict bands are what they are: `no-independent-gauges`, `fewer-than-two-bands`, or empty |
 

@@ -1,21 +1,23 @@
 """Band map and the one band-mean function (KTD4, R17). Pure; frozen at the bundle tag (KTD9).
 
 A band map says, for every IMD 0.25° lattice cell that holds part of the
-district, how much of the district lies in it (its weight), which elevation
-band covers most of that part, and which verdict band the cell reports to.
-``fetch_bands`` reads the district polygon and the DEM and hands rasters to
-``tally``; ``build`` turns the tallies into the map.
+district, how much of the district lies in it (its weight) and which verdict
+band the cell reports to. ``fetch_bands`` reads the district polygon and the
+DEM and hands rasters to ``tally``; ``build`` turns the tallies into the map.
 
-Elevation bands are the Himachal Pradesh agro-climatic zones as the state
-Department of Agriculture publishes them (agriculture.hp.gov.in/?p=3940):
-zone 1 up to 1000 m, zone 2 1001-1500 m, zone 3 1501-2500 m, zone 4 above.
-Zones 1-3 are the candidate bands; zone 4 is tallied so every district pixel
-is accounted for, but it is never a band of its own.
+Candidate bands are elevation zones 1-3; zone 4, above them, is tallied so
+every district pixel is accounted for, but it is never a band of its own. A
+cell's band is the zone covering most of its district area. Bands whose
+district area falls in a common cell share that cell's observation and merge
+into one verdict band. Bands count as independent only with distinct gauges
+behind them, so without gauge evidence, or with fewer than two verdict bands
+left, the map is one district-wide band and says why.
 
-Bands whose district area falls in a common cell share that cell's observation
-and merge into one verdict band. Bands count as independent only with distinct
-gauges behind them, so without gauge evidence, or with fewer than two verdict
-bands left, the map is one district-wide band and says why.
+Zone edges are not registered: the map file holds no zone or band column. The
+default edges are the Himachal Pradesh Department of Agriculture's
+(agriculture.hp.gov.in/?p=3940): zone 1 up to 1000 m, zone 2 to 1500 m, zone 3
+to 2500 m. ``docs/findings/2026-10-mandi-elevation-zones.md`` compares them
+with other published edges; the verdict band is the same under each.
 
 On disk the map is ``bands/band-map.csv``: fixed columns, fixed decimals, cells
 ascending by latitude then longitude, LF line ends. The same map always gives
@@ -43,8 +45,7 @@ NO_INDEPENDENT_GAUGES = "no-independent-gauges"
 FEWER_THAN_TWO_BANDS = "fewer-than-two-bands"
 REASONS = ("", NO_INDEPENDENT_GAUGES, FEWER_THAN_TWO_BANDS)
 
-COLUMNS = ("lat", "lon", "district_km2", "weight", *(z.replace("-", "_") for z in ZONES),
-           "band", "verdict_band", "reason")
+COLUMNS = ("lat", "lon", "district_km2", "weight", "verdict_band", "reason")
 
 # WGS84
 _A_KM = 6378.137
@@ -77,8 +78,6 @@ class Cell:
     lon: float
     district_km2: float
     weight: float  # share of the district's area
-    zone_shares: tuple[float, ...]  # share of the cell's district area in each of ZONES
-    band: str
     verdict_band: str
 
 
@@ -121,8 +120,11 @@ def strip_km2(south: np.ndarray, north: np.ndarray, width_deg: float) -> np.ndar
     return b2 / 2 * math.radians(width_deg) * (_zone_q(north) - _zone_q(south))
 
 
-def tally(raster: Raster) -> dict[tuple[int, int], np.ndarray]:
-    """District km² per lattice cell and zone: {(lat index, lon index): area per ZONES}."""
+def tally(raster: Raster, zone_upper_m: Sequence[float] = ZONE_UPPER_M) -> dict[tuple[int, int], np.ndarray]:
+    """District km² per lattice cell and zone: {(lat index, lon index): area per ZONES}.
+
+    ``zone_upper_m`` holds the inclusive upper edges of zones 1-3.
+    """
     elevation = np.asarray(raster.elevation, dtype=float)
     inside = np.asarray(raster.inside, dtype=bool)
     if elevation.ndim != 2 or inside.shape != elevation.shape:
@@ -135,7 +137,7 @@ def tally(raster: Raster) -> dict[tuple[int, int], np.ndarray]:
     row_km2 = strip_km2(lat - half, lat + half, 1 / raster.per_degree)
     cell_lat = _cell(raster.north - np.arange(rows), raster.per_degree)
     cell_lon = _cell(raster.west + np.arange(cols), raster.per_degree)
-    zone = np.searchsorted(ZONE_UPPER_M, elevation, side="left")
+    zone = np.searchsorted(zone_upper_m, elevation, side="left")
     areas = {}
     for i in np.unique(cell_lat):
         r = cell_lat == i
@@ -167,8 +169,7 @@ def build(tallies: Iterable[dict[tuple[int, int], np.ndarray]], *,
         raise BandMapError("no district area on any raster")
 
     merged = _merge_shared(areas.values())
-    # Ties go to the lower zone.
-    band = {key: ZONES[int(np.argmax(by_zone))] for key, by_zone in areas.items()}
+    band = {key: majority_band(by_zone) for key, by_zone in areas.items()}
     reason = ""
     if not independent_gauges:
         reason = NO_INDEPENDENT_GAUGES
@@ -180,10 +181,14 @@ def build(tallies: Iterable[dict[tuple[int, int], np.ndarray]], *,
         km2 = float(by_zone.sum())
         cells.append(Cell(
             lat=i * LATTICE, lon=j * LATTICE, district_km2=km2, weight=km2 / total,
-            zone_shares=tuple(float(a) / km2 for a in by_zone), band=band[i, j],
             verdict_band=DISTRICT if reason else merged.get(band[i, j], ""),
         ))
     return _rounded(BandMap(cells=tuple(cells), reason=reason))
+
+
+def majority_band(by_zone: np.ndarray) -> str:
+    """The zone holding most of a cell's district area; ties go to the lower zone."""
+    return ZONES[int(np.argmax(by_zone))]
 
 
 def _merge_shared(areas: Iterable[np.ndarray]) -> dict[str, str]:
@@ -210,7 +215,7 @@ def encode(band_map: BandMap, *, check: bool = True) -> bytes:
     for c in band_map.cells:
         lines.append(",".join([
             f"{c.lat:.2f}", f"{c.lon:.2f}", f"{c.district_km2:.3f}", f"{c.weight:.6f}",
-            *(f"{s:.4f}" for s in c.zone_shares), c.band, c.verdict_band, band_map.reason,
+            c.verdict_band, band_map.reason,
         ]))
     data = ("\n".join(lines) + "\n").encode()
     if check:
@@ -232,14 +237,12 @@ def decode(data: bytes) -> BandMap:
         if len(fields) != len(COLUMNS):
             raise BandMapError(f"line {n}: expected {len(COLUMNS)} fields")
         try:
-            lat, lon, km2, weight, *shares = (float(x) for x in fields[:4 + len(ZONES)])
+            lat, lon, km2, weight = (float(x) for x in fields[:4])
         except ValueError:
             raise BandMapError(f"line {n}: not a number") from None
-        band, verdict_band, reason = fields[-3:]
-        if band not in ZONES:
-            raise BandMapError(f"line {n}: unknown band {band!r}")
+        verdict_band, reason = fields[4:]
         reasons.add(reason)
-        cells.append(Cell(lat, lon, km2, weight, tuple(shares), band, verdict_band))
+        cells.append(Cell(lat, lon, km2, weight, verdict_band))
     band_map = BandMap(cells=tuple(cells), reason=reasons.pop() if len(reasons) == 1 else "?")
     _check(band_map)
     if encode(band_map, check=False) != data:
@@ -260,10 +263,6 @@ def _check(m: BandMap) -> None:
             raise BandMapError(f"cell {c.lat}, {c.lon} is off the IMD {LATTICE}° lattice")
         if not (c.district_km2 > 0 and 0 <= c.weight <= 1):
             raise BandMapError(f"cell {c.lat}, {c.lon} must hold district area and a weight in 0-1")
-        if any(not 0 <= s <= 1 for s in c.zone_shares) or abs(sum(c.zone_shares) - 1) > 1e-3:
-            raise BandMapError(f"cell {c.lat}, {c.lon}: zone shares must sum to 1")
-        if c.zone_shares[ZONES.index(c.band)] < max(c.zone_shares):
-            raise BandMapError(f"cell {c.lat}, {c.lon}: band {c.band} is not its largest zone")
         if m.reason and c.verdict_band != DISTRICT:
             raise BandMapError(f"a map with a reason has only the {DISTRICT} verdict band")
     if abs(sum(c.weight for c in m.cells) - 1) > 1e-4:

@@ -42,6 +42,10 @@ def cell(band_map: B.BandMap, lat: float, lon: float) -> B.Cell:
     return next(c for c in band_map.cells if (c.lat, c.lon) == (lat, lon))
 
 
+def zone_areas(tallied: dict, lat: float, lon: float) -> np.ndarray:
+    return tallied[round(lat / 0.25), round(lon / 0.25)]
+
+
 # --- area weights ------------------------------------------------------------
 
 
@@ -99,11 +103,17 @@ def test_zone_edges_are_inclusive_at_the_top():
     elevation = np.full(SHAPE, 1000.0)
     elevation[rows(31.5), :] = 1000.5
     elevation[rows(31.25), :] = 2500.5
-    band_map = B.build([B.tally(raster(whole_block(), elevation))])
+    tallied = B.tally(raster(whole_block(), elevation))
 
-    assert cell(band_map, 31.75, 77.0).band == "zone-1"
-    assert cell(band_map, 31.5, 77.0).band == "zone-2"
-    assert cell(band_map, 31.25, 77.0).band == "zone-4"
+    assert B.majority_band(zone_areas(tallied, 31.75, 77.0)) == "zone-1"
+    assert B.majority_band(zone_areas(tallied, 31.5, 77.0)) == "zone-2"
+    assert B.majority_band(zone_areas(tallied, 31.25, 77.0)) == "zone-4"
+
+
+def test_zone_edges_can_be_swapped_for_another_scheme():
+    tallied = B.tally(raster(whole_block(), 1000.0), zone_upper_m=(650.0, 1800.0, 2200.0))
+
+    assert B.majority_band(zone_areas(tallied, 31.5, 77.0)) == "zone-2"
 
 
 def test_cell_split_60_40_goes_to_the_majority_band():
@@ -112,11 +122,10 @@ def test_cell_split_60_40_goes_to_the_majority_band():
     inside = np.zeros(SHAPE, dtype=bool)
     inside[rows(31.5), cols(76.75)] = True
 
-    band_map = B.build([B.tally(raster(inside, elevation))])
+    areas = zone_areas(B.tally(raster(inside, elevation)), 31.5, 76.75)
 
-    only = band_map.cells[0]
-    assert only.band == "zone-2"
-    assert only.zone_shares == pytest.approx((0.4, 0.6, 0.0, 0.0), abs=1e-4)
+    assert areas / areas.sum() == pytest.approx((0.4, 0.6, 0.0, 0.0), abs=1e-4)
+    assert B.majority_band(areas) == "zone-2"
 
 
 def test_two_bands_that_share_a_cell_merge_into_one_verdict_band():
@@ -142,7 +151,6 @@ def test_without_gauge_evidence_the_map_is_one_district_wide_band_with_a_reason(
 
     assert band_map.verdict_bands == (B.DISTRICT,)
     assert band_map.reason == B.NO_INDEPENDENT_GAUGES
-    assert {c.band for c in band_map.cells} == {"zone-1", "zone-3"}  # bands are still recorded
 
 
 def test_fewer_than_two_verdict_bands_is_district_wide_even_with_gauges():
@@ -182,7 +190,8 @@ def test_band_map_file_round_trips_and_is_stable():
 
 
 @pytest.mark.parametrize("damage", [
-    lambda d: d.replace(b"zone-1,district", b"zone-9,district", 1),  # unknown band
+    lambda d: d.replace(b",district,", b",elsewhere,", 1),  # a second verdict band despite the reason
+    lambda d: d.replace(b",district,", b",zone-1,district,", 1),  # an extra column
     lambda d: d.replace(b"0.111", b"0.11100", 1),  # not canonical
     lambda d: d.replace(B.NO_INDEPENDENT_GAUGES.encode(), b"because", 1),  # mixed reasons
     lambda d: d.rstrip(b"\n"),  # no final newline
@@ -309,11 +318,24 @@ def test_tile_and_polygon_files_give_the_polygon_area(geo):
     fb, tile, polygon, area = geo
 
     geometry = fb.district_geometry(polygon, "here")
-    band_map = B.build([B.tally(fb.tile_raster(tile, geometry))])
+    tallied = B.tally(fb.tile_raster(tile, geometry))
+    band_map = B.build([tallied])
 
     assert sum(c.district_km2 for c in band_map.cells) == pytest.approx(area, rel=1e-6)
-    assert cell(band_map, 31.5, 76.75).band == "zone-1"
-    assert cell(band_map, 31.5, 77.25).band == "zone-2"
+    assert B.majority_band(zone_areas(tallied, 31.5, 76.75)) == "zone-1"
+    assert B.majority_band(zone_areas(tallied, 31.5, 77.25)) == "zone-2"
+
+
+def test_zone_report_covers_every_scheme(geo):
+    fb, tile, polygon, _ = geo
+    raster = fb.tile_raster(tile, fb.district_geometry(polygon, "here"))
+
+    report = fb.zone_report([raster])
+
+    assert all(f"### {name}" in report for name in fb.ZONE_SCHEMES)
+    # 57.9% of the rectangle is at 500 m and the rest at 1200 m: all zone 2 under the 650 m edge.
+    assert "| **District** | 100.0 | 57.9 | 42.1 | 0.0 | 0.0 | |" in report
+    assert "| **District** | 100.0 | 0.0 | 100.0 | 0.0 | 0.0 | |" in report
 
 
 def test_polygon_must_be_the_one_feature_with_the_shape_id(geo):

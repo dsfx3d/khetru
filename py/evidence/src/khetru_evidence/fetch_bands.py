@@ -12,6 +12,10 @@ the same bytes every time. Each DEM pixel whose centre lies in the polygon is
 counted once (``bands.tally``), and ``bands.build`` makes the map.
 ``ledger/mandi-wheat/bands/band-map.csv`` is write-once: a rebuild must
 reproduce it byte for byte.
+
+Zone edges are not registered. ``zone_report`` prints, for each published set
+of edges in ``ZONE_SCHEMES``, how the district and each cell divide into zones;
+``docs/findings/2026-10-mandi-elevation-zones.md`` holds its output.
 """
 
 import hashlib
@@ -63,6 +67,18 @@ DEM_TILES = (
     _dem("N32_00_E076", "6713f118440ac3760728e25c8f4dbf5953286bea91cfc50fc7a7a6e4939f8389"),
     _dem("N32_00_E077", "d2861f79c130b6f5fbd619a87f544b8f9abdf2abd21995c01d2614961060c044"),
 )
+
+
+# Published edges of Himachal agro-climatic zones 1-3 (inclusive upper edge, m).
+ZONE_SCHEMES = {
+    # agriculture.hp.gov.in/?p=3940; zone 3 ends at 2500 m where rainfall is at
+    # most 1500 mm and at 3250 m where it is more.
+    "HP Department of Agriculture, zone 3 to 2500 m": bands.ZONE_UPPER_M,
+    "HP Department of Agriculture, zone 3 to 3250 m": (1000.0, 1500.0, 3250.0),
+    # Commonly attributed to CSK HPKV; no primary source found.
+    "Attributed to CSK HPKV": (650.0, 1800.0, 2200.0),
+}
+REPORT_MIN_WEIGHT = 0.01  # cells holding less of the district are left out of the report
 
 
 def obtain(source: Source, cache_dir: Path) -> Path:
@@ -136,11 +152,16 @@ def _require_within(geometry: dict, rasters: list[bands.Raster]) -> None:
         raise SourceError("the district polygon reaches beyond the DEM tiles")
 
 
-def build_band_map(cache_dir: Path) -> bands.BandMap:
+def district_rasters(cache_dir: Path) -> list[bands.Raster]:
+    """Every DEM tile with the district's pixels marked."""
     geometry = district_geometry(obtain(POLYGON, cache_dir))
     rasters = [tile_raster(obtain(tile, cache_dir), geometry) for tile in DEM_TILES]
     _require_within(geometry, rasters)
-    band_map = bands.build(bands.tally(r) for r in rasters)
+    return rasters
+
+
+def build_band_map(cache_dir: Path) -> bands.BandMap:
+    band_map = bands.build(bands.tally(r) for r in district_rasters(cache_dir))
     # Forecast records hold the Mandi box plus a margin; the map must fit inside the box.
     lats, lons = forecasts.box_cells(forecasts.MANDI_BOX, margin=0)
     outside = [c for c in band_map.cells if c.lat not in lats or c.lon not in lons]
@@ -166,3 +187,42 @@ def build(*, repo: Path) -> int:
     print(f"{path.relative_to(repo)} differs from the rebuild; the band map is write-once",
           file=sys.stderr)
     return 1
+
+
+def zone_report(rasters: list[bands.Raster]) -> str:
+    """Markdown: the district and its larger cells by zone, under each of ``ZONE_SCHEMES``."""
+    lines = []
+    for name, edges in ZONE_SCHEMES.items():
+        areas: dict[tuple[int, int], np.ndarray] = {}
+        for raster in rasters:
+            for key, by_zone in bands.tally(raster, edges).items():
+                areas[key] = areas.get(key, 0.0) + by_zone
+        total = sum(areas.values()).sum()
+        with_gauges = bands.build([areas], independent_gauges=True)
+        low, mid, high = (f"{e:.0f}" for e in edges)
+        lines += [
+            f"### {name}", "",
+            f"Edges: zone 1 up to {low} m, zone 2 to {mid} m, zone 3 to {high} m, zone 4 above.", "",
+            "| Cell (°N, °E) | % of district | Zone 1 | Zone 2 | Zone 3 | Zone 4 | Majority |",
+            "|---|---|---|---|---|---|---|",
+        ]
+        for (i, j), by_zone in sorted(areas.items()):
+            if by_zone.sum() / total < REPORT_MIN_WEIGHT:
+                continue
+            shares = " | ".join(f"{100 * a / by_zone.sum():.1f}" for a in by_zone)
+            lines.append(
+                f"| {i * bands.LATTICE:.2f}, {j * bands.LATTICE:.2f} | {100 * by_zone.sum() / total:.1f} "
+                f"| {shares} | {bands.majority_band(by_zone)} |"
+            )
+        district = " | ".join(f"{100 * a / total:.1f}" for a in sum(areas.values()))
+        lines += [
+            f"| **District** | 100.0 | {district} | |", "",
+            f"Verdict bands if independent gauges existed: {', '.join(with_gauges.verdict_bands)}"
+            + (f" ({with_gauges.reason})." if with_gauges.reason else "."), "",
+        ]
+    return "\n".join(lines)
+
+
+def zones(*, repo: Path) -> int:
+    print(zone_report(district_rasters(repo / ".cache" / "evidence" / CACHE_DIR)), end="")
+    return 0

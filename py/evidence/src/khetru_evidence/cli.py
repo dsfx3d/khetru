@@ -46,9 +46,10 @@ def main(argv: list[str] | None = None) -> int:
     same_cmd.set_defaults(run=_run_same_record)
 
     bands_cmd = commands.add_parser(
-        "bands", help="build the band map from its recorded sources; a rebuild must reproduce it"
+        "bands", help="build: make the band map from its recorded sources, or check a rebuild "
+        "reproduces it; zones: print the district by elevation zone under each published scheme"
     )
-    bands_cmd.add_argument("action", choices=("build",))
+    bands_cmd.add_argument("action", choices=("build", "zones"))
     bands_cmd.add_argument("--repo", type=Path, help="repository root (default: current repo)")
     bands_cmd.set_defaults(run=_run_bands)
 
@@ -89,7 +90,8 @@ def _run_archive(args: argparse.Namespace) -> int:
 def _run_bands(args: argparse.Namespace) -> int:
     from khetru_evidence import fetch_bands
 
-    return fetch_bands.build(repo=_repo_root(args))
+    run = {"build": fetch_bands.build, "zones": fetch_bands.zones}[args.action]
+    return run(repo=_repo_root(args))
 
 
 def _run_same_record(args: argparse.Namespace) -> int:
