@@ -131,9 +131,9 @@ the live seasons until a band can be judged, how often a hindcast of a given
 true skill would pass, and how often the live check would fail or pass. It
 reads the IMD final observations and no forecast; forecasts are simulated at a
 stated skill, with a season's errors independent and again shared. With `--check` it fails unless the committed table matches. The
-procedure is `docs/findings/2026-10-mandi-power-simulation-procedure.md`, and
-it is committed before the first run, so `power.md` does not exist until the
-owner has accepted it. The owner chooses the bundle v1 values from the table at
+procedure is `docs/findings/2026-10-mandi-power-simulation-procedure.md`; it
+was committed before the first run, and a later change to it is listed there.
+A run takes about 15 minutes, so no test repeats it. The owner chooses the bundle v1 values from the table at
 U8.
 
 ## Data attribution
