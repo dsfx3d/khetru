@@ -235,6 +235,34 @@ def test_a_different_record_for_a_saved_init_is_refused(tmp_path):
     assert (root / rel).read_bytes() == before
 
 
+def test_the_same_run_from_two_mirrors_is_the_same_record_but_not_the_same_bytes(tmp_path):
+    record = record_from_grib(tmp_path, ens_messages())
+    ecmwf = fc.encode_record({**record, "source_url": "https://data.ecmwf.int/forecasts/"})
+    aws = fc.encode_record({**record, "source_url": "https://ecmwf-forecasts.s3.amazonaws.com/"})
+
+    assert ecmwf != aws
+    assert fc.same_run(ecmwf, aws)
+    assert not fc.same_run(ecmwf, fc.encode_record({**record, "raw_sha256": "1" * 64}))
+    assert not fc.same_run(ecmwf, aws + b"x")  # an unreadable copy never matches
+    # 1.0 and True are equal in Python but not the same evidence
+    wet = {**record, "control": [[[1.0 for _ in row] for row in grid] for grid in record["control"]]}
+    flagged = {**record, "control": [[[True for _ in row] for row in grid] for grid in record["control"]]}
+    assert not fc.same_run(fc.encode_record(wet), fc.encode_record(flagged))
+
+
+def test_same_record_command_exits_0_only_for_the_same_run(tmp_path):
+    record = record_from_grib(tmp_path, ens_messages())
+    paths = {}
+    for name, change in (("ecmwf", {"source_url": "https://data.ecmwf.int/forecasts/"}),
+                         ("aws", {"source_url": "https://ecmwf-forecasts.s3.amazonaws.com/"}),
+                         ("other", {"raw_sha256": "1" * 64})):
+        paths[name] = tmp_path / f"{name}.json.gz"
+        paths[name].write_bytes(fc.encode_record({**record, **change}))
+
+    assert cli.main(["same-record", str(paths["ecmwf"]), str(paths["aws"])]) == 0
+    assert cli.main(["same-record", str(paths["ecmwf"]), str(paths["other"])]) == 1
+
+
 def test_a_write_that_fails_midway_leaves_no_file(tmp_path, monkeypatch):
     record = record_from_grib(tmp_path, ens_messages())
     root = tmp_path / "ledger" / "mandi-wheat"
