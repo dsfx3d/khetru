@@ -71,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
     observe_cmd.set_defaults(run=_run_observe)
 
     issue_cmd = commands.add_parser(
-        "issue", help="--date: append that issue date's claim per verdict band; --backfill-missing: "
+        "issue", help="--date: append that issue date's claim per verdict band and view; --backfill-missing: "
         "record not_issued for started windows with no claim; --check: re-derive every claim"
     )
     action = issue_cmd.add_mutually_exclusive_group(required=True)
@@ -236,9 +236,15 @@ def _run_score(args: argparse.Namespace) -> int:
               + (f"; {e['reason']}" if "reason" in e else ""))
     if not written:
         print("evidence score: nothing to write")
-    counts = scoring.outcomes(ledger.read(scoring.scores_file(rel)))
+    scores = scoring.current(ledger.read(scoring.scores_file(rel)))
+    counts = scoring.outcomes(scoring.registered(scores))
     print(f"evidence score: {args.kind} current scores: "
           + ", ".join(f"{counts[o]} {o}" for o in OUTCOMES))
+    # A view is counted on its own line, never with the verdict bands.
+    for band in sorted({e["band"] for e in scores} - {e["band"] for e in scoring.registered(scores)}):
+        counts = scoring.outcomes(e for e in scores if e["band"] == band)
+        print(f"evidence score: {args.kind} current scores, {band} (a view, never part of a verdict): "
+              + ", ".join(f"{counts[o]} {o}" for o in OUTCOMES))
     return 0
 
 

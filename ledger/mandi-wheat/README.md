@@ -41,6 +41,28 @@ observed field into the band value with these weights and one coverage rule.
 `uv run --all-packages evidence bands build` (needs `uv sync --all-extras`)
 rebuilds the map and fails unless it matches the committed file byte for byte.
 
+## Exploratory views
+
+`bands/view-<name>.csv` is an area issued and scored beside the verdict bands,
+by the same rules and the same band-mean function, with its own cell weights.
+It is not a verdict band. Its band is named `view-<name>`, and its claims and
+scores are always `exploratory`, under any bundle and after any tag: the
+ledger refuses them under `live` or `hindcast`, and
+`khetru_evidence.scoring.standing` leaves them out, so a view never adds to a
+verdict, a skill figure or a band switch. `evidence issue` and `evidence score`
+handle a view with the verdict bands, in `claims/exploratory.jsonl` and
+`scores/exploratory.jsonl`, and `evidence score` counts it on its own line.
+Each claim and score names its own area's file under `evidence`, never
+another's.
+
+There is one view, `bands/view-foothill-cell.csv`: the single IMD cell centred
+32.00°N, 76.75°E, the Dhauladhar foothill corner of the district, with weight 1.
+It stands for the whole cell. `bands/view-foothill-cell.PROVENANCE.md` says how
+the file was made. `docs/findings/2026-10-foothill-cell-exploratory-view.md`
+says why it exists, and that the later choice of registered area may cite
+observations, gauge provenance, geography and agronomic guidance only, never a
+forecast score, skill figure or claim outcome of either area.
+
 ## Observations
 
 `observations/imd-<vintage>-<first>-<last>.json.gz` holds IMD 0.25° gridded
