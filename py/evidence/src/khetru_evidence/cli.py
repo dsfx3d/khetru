@@ -24,7 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     verify_cmd.set_defaults(run=_run_verify)
 
     archive_cmd = commands.add_parser(
-        "archive", help="save a day's ECMWF open-data ENS runs (1 Oct-30 Nov) as write-once inputs"
+        "archive", help="save a day's ECMWF open-data ENS runs (1 Oct-16 Dec) as write-once inputs"
     )
     archive_cmd.add_argument(
         "--date", type=date.fromisoformat, help="run date YYYY-MM-DD (default: today, UTC)"

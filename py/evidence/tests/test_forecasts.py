@@ -368,12 +368,27 @@ def test_2024_10_opendata_request_without_tag_is_refused(repo, tmp_path, no_netw
     assert opendata.requests == []
 
 
+@pytest.mark.parametrize("init", [
+    datetime(2023, 12, 1, tzinfo=UTC), datetime(2025, 12, 14, tzinfo=UTC),
+    datetime(2025, 12, 31, 12, tzinfo=UTC),
+], ids=["first-day", "mid-month", "last-run"])
+def test_pre_2026_december_request_without_tag_is_refused_by_both_adapters(
+        repo, tmp_path, no_network, init):
+    tigge, opendata = no_network
+    with pytest.raises(ff.ProtectedDateError):
+        ff.fetch_tigge(init, repo=repo, cache_dir=tmp_path / "c")
+    with pytest.raises(ff.ProtectedDateError):
+        ff.fetch_opendata(init, repo=repo, cache_dir=tmp_path / "c", source="aws")
+    assert tigge.requests == [] and opendata.requests == []
+
+
 def test_run_whose_steps_reach_into_pre_2026_oct_is_refused(repo, tmp_path, no_network):
     # A 2025-09-25 run's 360 h steps cover 1-10 Oct 2025.
     with pytest.raises(ff.ProtectedDateError):
         ff.guard(datetime(2025, 9, 25, tzinfo=UTC), repo)
-    ff.guard(datetime(2025, 7, 15, tzinfo=UTC), repo)  # outside Oct-Nov: allowed
+    ff.guard(datetime(2025, 7, 15, tzinfo=UTC), repo)  # outside Oct-Dec: allowed
     ff.guard(datetime(2026, 10, 15, tzinfo=UTC), repo)  # rabi 2026 development data: allowed
+    ff.guard(datetime(2026, 12, 14, tzinfo=UTC), repo)
 
 
 PROTECTED = datetime(2023, 10, 23, tzinfo=UTC)
@@ -465,6 +480,17 @@ def test_november_is_protected(repo):
         ff.guard(datetime(2023, 11, 20, tzinfo=UTC), repo)
 
 
+def test_december_is_protected(repo):
+    with pytest.raises(ff.ProtectedDateError):
+        ff.guard(datetime(2023, 12, 14, tzinfo=UTC), repo)
+
+
+def test_protection_ends_with_the_last_run_of_2025():
+    assert ff.is_protected(datetime(2025, 12, 31, 12, tzinfo=UTC))
+    assert not ff.is_protected(datetime(2026, 1, 1, tzinfo=UTC))
+    assert not ff.is_protected(datetime(2025, 1, 1, tzinfo=UTC))  # +360 h = 16 Jan
+
+
 def test_protection_starts_with_the_first_run_whose_last_step_reaches_october():
     assert ff.is_protected(datetime(2025, 9, 16, tzinfo=UTC))  # +360 h = 1 Oct 00Z
     assert not ff.is_protected(datetime(2025, 9, 15, tzinfo=UTC))  # +360 h = 30 Sep 00Z
@@ -528,18 +554,25 @@ def test_archive_reports_an_unreadable_saved_record_and_leaves_it(repo, no_netwo
     assert opendata.requests == []
 
 
-def test_archive_skips_days_outside_1_oct_to_30_nov(repo, no_network, small_run, capsys):
+@pytest.mark.parametrize("day", ["2026-09-30", "2026-12-17"])
+def test_archive_skips_days_outside_1_oct_to_16_dec(repo, no_network, small_run, capsys, day):
     _, opendata = no_network
-    argv = ["archive", "--date", "2026-12-01", "--repo", str(repo)]
+    argv = ["archive", "--date", day, "--repo", str(repo)]
     assert cli.main(argv) == 0
     assert opendata.requests == []
-    assert "outside" in capsys.readouterr().out
+    assert "outside the 1 Oct–16 Dec" in capsys.readouterr().out
 
 
 def test_archive_defaults_to_both_runs_of_the_day(repo, no_network, small_run):
     assert cli.main(["archive", "--date", "2026-11-30", "--repo", str(repo)]) == 0
     names = sorted(p.name for p in (repo / "ledger" / "mandi-wheat" / "inputs").iterdir())
     assert names == ["ens-opendata-2026113000.json.gz", "ens-opendata-2026113012.json.gz"]
+
+
+def test_archive_saves_the_last_day_of_the_season(repo, no_network, small_run):
+    assert cli.main(["archive", "--date", "2026-12-16", "--repo", str(repo)]) == 0
+    names = sorted(p.name for p in (repo / "ledger" / "mandi-wheat" / "inputs").iterdir())
+    assert names == ["ens-opendata-2026121600.json.gz", "ens-opendata-2026121612.json.gz"]
 
 
 def test_archived_inputs_pass_verify_and_may_not_change(repo, no_network, small_run):
