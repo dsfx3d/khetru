@@ -1,4 +1,4 @@
-"""`evidence` command line. Subcommands are added per unit: `verify` (U2), `bands` (U3), `observe` (U4), `archive` and `same-record` (U5), `issue` (U6), `score` (U7)."""
+"""`evidence` command line. Subcommands are added per unit: `verify` (U2), `bands` (U3), `observe` (U4), `archive` and `same-record` (U5), `issue` (U6), `score` (U7), `bundle` (U8)."""
 
 import argparse
 import os
@@ -99,6 +99,15 @@ def main(argv: list[str] | None = None) -> int:
     score_cmd.add_argument("--ledger", default="mandi-wheat")
     score_cmd.add_argument("--repo", type=Path, help="repository root (default: current repo)")
     score_cmd.set_defaults(run=_run_score)
+
+    bundle_cmd = commands.add_parser(
+        "bundle", help="power: write the power simulation table from the saved observations, "
+        "or check it reproduces"
+    )
+    bundle_cmd.add_argument("action", choices=("power",))
+    bundle_cmd.add_argument("--check", action="store_true", help="exit 1 unless the committed table matches")
+    bundle_cmd.add_argument("--repo", type=Path, help="repository root (default: current repo)")
+    bundle_cmd.set_defaults(run=_run_bundle)
 
     args = parser.parse_args(argv)
     return args.run(args)
@@ -231,6 +240,12 @@ def _run_score(args: argparse.Namespace) -> int:
     print(f"evidence score: {args.kind} current scores: "
           + ", ".join(f"{counts[o]} {o}" for o in OUTCOMES))
     return 0
+
+
+def _run_bundle(args: argparse.Namespace) -> int:
+    from khetru_evidence import bundle
+
+    return bundle.write_power(repo=_repo_root(args), check=args.check)
 
 
 def _run_same_record(args: argparse.Namespace) -> int:
