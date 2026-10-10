@@ -25,7 +25,8 @@ jobs:
       - uses: astral-sh/setup-uv@v6
 
       - run: pnpm install --frozen-lockfile
-      - run: uv sync --all-packages --locked
+      # --all-extras: the band-map build tests need the geo extra.
+      - run: uv sync --all-packages --all-extras --locked
 
       - run: pnpm test
 

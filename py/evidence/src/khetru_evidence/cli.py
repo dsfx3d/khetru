@@ -1,4 +1,4 @@
-"""`evidence` command line. Subcommands are added per unit: `verify` (U2), `archive` and `same-record` (U5)."""
+"""`evidence` command line. Subcommands are added per unit: `verify` (U2), `bands` (U3), `archive` and `same-record` (U5)."""
 
 import argparse
 import subprocess
@@ -45,6 +45,13 @@ def main(argv: list[str] | None = None) -> int:
     same_cmd.add_argument("records", type=Path, nargs=2, metavar="RECORD")
     same_cmd.set_defaults(run=_run_same_record)
 
+    bands_cmd = commands.add_parser(
+        "bands", help="build the band map from its recorded sources; a rebuild must reproduce it"
+    )
+    bands_cmd.add_argument("action", choices=("build",))
+    bands_cmd.add_argument("--repo", type=Path, help="repository root (default: current repo)")
+    bands_cmd.set_defaults(run=_run_bands)
+
     args = parser.parse_args(argv)
     return args.run(args)
 
@@ -77,6 +84,12 @@ def _run_archive(args: argparse.Namespace) -> int:
     day = args.date or datetime.now(UTC).date()
     hours = sorted(set(args.hours)) if args.hours else fetch_forecasts.RUN_HOURS
     return fetch_forecasts.archive(day, hours, repo=repo, source=args.source)
+
+
+def _run_bands(args: argparse.Namespace) -> int:
+    from khetru_evidence import fetch_bands
+
+    return fetch_bands.build(repo=_repo_root(args))
 
 
 def _run_same_record(args: argparse.Namespace) -> int:

@@ -16,8 +16,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Band map build (U3) fills this in.
-geo = []
+# Band map build (`evidence bands build`): reads the DEM tiles and rasterises the polygon.
+geo = ["rasterio>=1.4"]
 
 [project.scripts]
 evidence = "khetru_evidence.cli:main"
