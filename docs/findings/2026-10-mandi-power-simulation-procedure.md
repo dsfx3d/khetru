@@ -80,4 +80,17 @@ Decided by the owner on 2026-10-11, before the run: rows with errors shared with
 
 Any change to this procedure or to `bundle.Design` after the first run on the IMD files is listed here with its date and reason. The earlier `power.md` stays in git history.
 
-- None.
+### 2026-10-11: recount with issue dates to 14 Dec
+
+- **What was added.** A second table, `ledger/mandi-wheat/power-december.md`, written by `uv run --all-packages evidence bundle power --variant december`. It repeats every step above with two development values changed: issue dates on every Monday from 15 Oct to 14 Dec (the first run stops at 15 Nov), and a sowing cutoff of 16 Dec (the first run has 30 Nov). It counts two areas: the verdict band `district`, then the exploratory view `view-foothill-cell`, which is IMD cell 32.00N 76.75E alone (`bands/view-foothill-cell.csv`). A view is read beside the verdict bands and is never one of them. Every other value, and every default of `bundle.Design`, is the first run's.
+- **Why.** The CSK HPKV guidance the owner follows gives the last wheat sowing week as 10–16 Dec, and the owner dropped 30 Nov as the cutoff. The owner asked for the recount before deciding whether issue dates should run to mid-December. The recount is evidence for that decision. The owner has not adopted December issue dates.
+- **The first run is unchanged.** `power.md` is the same bytes, and `evidence bundle power --check` still reproduces it. The changed values are a named variant in `bundle.py` (`bundle.DECEMBER`), applied to the loaded development values. No bundle was written for them, because a bundle directory is permanent and `bundles/dev/` is not edited.
+- **What had been seen when it was made.** `power.md`, `base-rates.md` and the CSK HPKV guidance. No forecast for any season, and no Brier score or skill for rabi 2026 (KTD11). The code was tested on synthetic rainfall before the run on the IMD files.
+- **Seeds.** The first run's seeds are unchanged. The variant puts 2 and 3 where the first run has 0 and 1 in the second position of each seed, and the view takes band position 1. No row of either table shares a seed with another.
+- **Seasons and missing values.** The earlier check covered October and November only. The recount needs every date from 10 Oct to 29 Dec at the widest. All 35 seasons have them. December has no missing cell value in either area, and no issue date is unverifiable. The table's header gives the counts.
+- **Issue dates with no room before the cutoff.** "Next rain before the sowing cutoff" needs 7 dates in a row from the window's first date to the cutoff. With a cutoff of 16 Dec, a window that starts after 10 Dec has no room for them, and `obs_core.rain_before` would call it not held. Such an issue date is left out of that event and of that event's climatology, as an unverifiable one is. This leaves out 30 of 304 issue dates: the last one of each season, but for the 5 seasons where 8 Dec is a Monday (1997, 2003, 2008, 2014, 2025). The 7-day event keeps all 304. With the first run's values every issue date has room, so the first run is not affected.
+- **The limit on the cutoff event grows.** With the later cutoff it looks 16 days further ahead than in the first run.
+- **The agent's choices, open for the owner.** These three were made by the agent to run the recount, not by the owner:
+  1. The cutoff of 16 Dec, taken as the last day of the guidance's last sowing week.
+  2. The last issue date of 14 Dec. A window is the 7 dates from 2 days after its issue date, so a season's last window ends after the cutoff (on 17–22 Dec), but for the 5 seasons where 8 Dec is a Monday.
+  3. Leaving out the issue dates with no room, where counting them as not held was the other choice.

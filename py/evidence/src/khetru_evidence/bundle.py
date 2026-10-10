@@ -16,6 +16,10 @@ over: independent of one another, and ``shared``, where one draw decides how
 good every forecast of the season is. Real forecast errors lie between the two.
 Every verdict is then read with the ``score_core`` functions the real record
 will use.
+
+A ``Variant`` is a recount made after the first run with some development
+values changed in code; no bundle is written for it. It has its own output
+file and its own seed positions, and the first run's table does not change.
 """
 
 import dataclasses
@@ -33,7 +37,7 @@ from pathlib import Path
 import numpy as np
 from scipy.special import betaincinv
 
-from khetru_evidence import bands, obs_core, observations, score_core, semantics
+from khetru_evidence import bands, obs_core, observations, score_core, semantics, views
 
 POWER_PATH = "power.md"
 WINDOW, BEFORE_CUTOFF = "window", "before_cutoff"
@@ -41,6 +45,10 @@ EVENTS = (WINDOW, BEFORE_CUTOFF)
 # How a season's simulated forecast errors relate to one another.
 INDEPENDENT, SHARED = "independent", "shared"
 ERRORS = (INDEPENDENT, SHARED)
+# "Rain before the cutoff" for a window that starts too late for a run of its length to end by the
+# cutoff. Such an issue date is left out of that event, as an unverifiable one is.
+NO_ROOM = "no_room"
+JUDGED = (obs_core.HELD, obs_core.NOT_HELD)
 
 
 @dataclass(frozen=True)
@@ -63,6 +71,39 @@ class Design:
 
 
 @dataclass(frozen=True)
+class Variant:
+    """A run of the simulation: the first one, or a later recount with some development values changed."""
+
+    name: str | None  # what `evidence bundle power --variant` takes; None for the first run
+    path: str  # the table, under the ledger root
+    made: str = ""  # the date a recount was made
+    season_end: tuple[int, int] | None = None  # replaces the development value when given
+    sowing_cutoff: tuple[int, int] | None = None
+    views: bool = False  # whether the exploratory views are counted after the verdict bands
+    # Second number of every seed. A variant has its own two, so none of its rows shares a seed.
+    until_stream: int = 0
+    simulate_stream: int = 1
+
+
+FIRST_RUN = Variant(None, POWER_PATH)
+# Issue dates on every Monday to 14 Dec and a cutoff of 16 Dec: the last sowing week in the CSK HPKV
+# guidance is 10-16 Dec. Evidence for the owner's choice of issue dates; not adopted values.
+DECEMBER = Variant("december", "power-december.md", made="2026-10-11", season_end=(12, 14),
+                   sowing_cutoff=(12, 16), views=True, until_stream=2, simulate_stream=3)
+VARIANTS = {v.name: v for v in (DECEMBER,)}
+
+
+def values(variant: Variant, sem: semantics.Semantics,
+           obs_rules: obs_core.Rules) -> tuple[semantics.Semantics, obs_core.Rules]:
+    """The development values with ``variant``'s changes."""
+    if variant.season_end:
+        sem = dataclasses.replace(sem, season_end=variant.season_end)
+    if variant.sowing_cutoff:
+        obs_rules = dataclasses.replace(obs_rules, sowing_cutoff=variant.sowing_cutoff)
+    return sem, obs_rules
+
+
+@dataclass(frozen=True)
 class Slot:
     """One issue date of one event: what was observed and what climatology said."""
 
@@ -77,6 +118,8 @@ class Season:
     slots: tuple[Slot, ...]  # issue dates with an outcome; unverifiable ones are left out
     positive: int  # independent episodes
     negative: int
+    unverifiable: int = 0  # issue dates left out for a date with no value
+    no_room: int = 0  # issue dates left out of "rain before the cutoff" for starting too late
 
 
 @dataclass(frozen=True)
@@ -117,19 +160,49 @@ def cutoff_climatology(outcome: Callable[[date], str], first: date, *, years, ha
         centre = first.replace(year=year)
         for shift in range(-half_window_days, half_window_days + 1):
             result = outcome(centre + timedelta(days=shift))
-            if result != obs_core.UNVERIFIABLE:
+            if result in JUDGED:
                 windows += 1
                 events += result == obs_core.HELD
     return obs_core.Climatology((events + pseudo_count) / (windows + 2 * pseudo_count), events, windows)
 
 
+def has_room(first: date, days: int, cutoff: tuple[int, int]) -> bool:
+    """Whether a run of ``days`` dates starting on ``first`` ends by the cutoff of its year."""
+    return first + timedelta(days=days - 1) <= date(first.year, *cutoff)
+
+
 def rain_before_cutoff(band: Mapping[date, float], days: int, threshold_mm: float,
                        cutoff: tuple[int, int]) -> Callable[[date], str]:
-    """The outcome of "rain before the cutoff" by the window's first date, worked out once per date."""
+    """The outcome of "rain before the cutoff" by the window's first date, worked out once per date.
+
+    ``no_room`` when no run of ``days`` dates fits between that date and the
+    cutoff; ``obs_core.rain_before`` alone would call it not held.
+    """
     @functools.cache
     def outcome(first: date) -> str:
+        if not has_room(first, days, cutoff):
+            return NO_ROOM
         return obs_core.rain_before(band, first, date(first.year, *cutoff), days, threshold_mm)
     return outcome
+
+
+def used_dates(sem: semantics.Semantics, rules: obs_core.Rules, year: int) -> tuple[date, date]:
+    """The first and last observed date a season's windows and their climatology can use."""
+    issues = semantics.issue_dates(sem, year)
+    first, last = (obs_core.imd_dates(semantics.schedule(sem, issue)) for issue in (issues[0], issues[-1]))
+    pooled = timedelta(days=rules.climatology_half_window_days)
+    return first[0] - pooled, max(last[-1] + pooled, date(year, *rules.sowing_cutoff))
+
+
+def short_seasons(have, years: Sequence[int], sem: semantics.Semantics, rules: obs_core.Rules) -> dict[int, int]:
+    """Seasons with a used date that is not among the dates ``have``, with how many are not."""
+    short = {}
+    for year in years:
+        first, last = used_dates(sem, rules, year)
+        gone = sum(d not in have for d in obs_core.run_dates(first, (last - first).days + 1))
+        if gone:
+            short[year] = gone
+    return short
 
 
 def observed_seasons(band: Mapping[date, float], years: Sequence[int], sem: semantics.Semantics,
@@ -140,7 +213,8 @@ def observed_seasons(band: Mapping[date, float], years: Sequence[int], sem: sema
     ``before_cutoff`` is some run of the window's length reaching the threshold
     between the window's first date and the sowing cutoff. A season's held issue
     dates then lean on the same rain, so its episodes are the runs of held and
-    of not-held issue dates: at most one of each.
+    of not-held issue dates: at most one of each. An issue date with no room
+    for such a run before the cutoff is left out, of climatology too.
     """
     pooling = {"half_window_days": rules.climatology_half_window_days,
                "pseudo_count": rules.climatology_pseudo_count}
@@ -159,13 +233,14 @@ def observed_seasons(band: Mapping[date, float], years: Sequence[int], sem: sema
         elif event == BEFORE_CUTOFF:
             results = [before_cutoff(w[0]) for w in windows]
             climatology = [cutoff_climatology(before_cutoff, w[0], years=others, **pooling) for w in windows]
-            positive, negative = runs([r for r in results if r != obs_core.UNVERIFIABLE])
+            positive, negative = runs([r for r in results if r in JUDGED])
         else:
             raise ValueError(f"unknown event {event!r}")
         slots = tuple(Slot(issue.isoformat(), result, c.probability)
                       for issue, result, c in zip(issues, results, climatology)
-                      if result != obs_core.UNVERIFIABLE)
-        out.append(Season(year, slots, positive, negative))
+                      if result in JUDGED)
+        out.append(Season(year, slots, positive, negative, results.count(obs_core.UNVERIFIABLE),
+                          results.count(NO_ROOM)))
     return out
 
 
@@ -282,33 +357,70 @@ def _listed(values: Sequence[float]) -> str:
     return ", ".join(f"{v:g}" for v in values)
 
 
-def power(ledger_root: Path, design: Design = Design()) -> str:
+def jobs(pools: Mapping[tuple[int, int], Sequence[Season]], b: int, rules: score_core.Rules, design: Design,
+         variant: Variant = FIRST_RUN) -> dict[tuple, tuple]:
+    """The simulations of area ``b``: one per event, threshold, season range, true skill and kind of errors.
+
+    Each has its own seed, the last item, so the table does not depend on how
+    many processes share the work.
+    """
+    return {
+        (e, t, r, k, x): ([s for s in pool if s.year >= first], pool, skill, errors, rules, design,
+                          [rules.bootstrap_seed, variant.simulate_stream, b, e, t, r, k, x])
+        for (e, t), pool in pools.items()
+        for r, first in enumerate(design.simulated_first_years)
+        for k, skill in enumerate(design.skills)
+        for x, errors in enumerate(ERRORS)
+    }
+
+
+def until_seed(rules: score_core.Rules, variant: Variant, b: int, e: int, t: int, n: int) -> list[int]:
+    """The seed of one cell of "live seasons until a band can be judged"."""
+    return [rules.bootstrap_seed, variant.until_stream, b, e, t, n]
+
+
+def power(ledger_root: Path, design: Design = Design(), variant: Variant = FIRST_RUN) -> str:
     """The power table as Markdown, from the saved final records the dev bundle names."""
     bundle = ledger_root / observations.DEV_BUNDLE_DIR
-    sem = semantics.load(bundle / "bundle.toml")
-    obs_rules = obs_core.load_rules(bundle / "observations.toml")
+    dev = semantics.load(bundle / "bundle.toml"), obs_core.load_rules(bundle / "observations.toml")
+    sem, obs_rules = values(variant, *dev)
     rules = score_core.load_rules(bundle / "scoring.toml")
     vintage = rules.climatology_vintage
-    band_map = observations.load_band_map(ledger_root)
+    main = views.Area(ledger_root / bands.BAND_MAP_PATH, observations.load_band_map(ledger_root))
+    areas = {band: area for area in ([main, *views.areas(ledger_root)[1:]] if variant.views else [main])
+             for band in area.band_map.verdict_bands}
     series = observations.load(ledger_root, vintage)
     years = [y for y in observations.full_years(series) if y >= obs_rules.climatology_first_year]
-    cutoff = f"{obs_rules.sowing_cutoff[1]} {date(2000, obs_rules.sowing_cutoff[0], 1):%b}"
+    short = short_seasons(set(series.dates), years, sem, obs_rules)
+    years = [y for y in years if y not in short]
+    cutoff = observations.day_month(obs_rules.sowing_cutoff)
     files = observations.record_files(ledger_root, vintage)
+    command = "evidence bundle power" + (f" --variant {variant.name}" if variant.name else "")
+    daily = {band: obs_core.band_daily(series, area.band_map, band, obs_rules.coverage_share)
+             for band, area in areas.items()}
+    pools = {band: {(e, t): observed_seasons(daily[band], years, sem, obs_rules, event, threshold)
+                    for e, event in enumerate(EVENTS) for t, threshold in enumerate(design.thresholds_mm)}
+             for band in areas}
 
     out = [
-        "# Mandi wheat power simulation", "",
-        "Generated by `evidence bundle power`; do not edit. The procedure is",
+        "# Mandi wheat power simulation" + (f": {variant.name.capitalize()} recount" if variant.name else ""), "",
+        f"Generated by `{command}`; do not edit. The procedure is",
         "`docs/findings/2026-10-mandi-power-simulation-procedure.md`. Outcomes and climatology come",
         "from the committed IMD files named below, with the development rule values; forecasts are",
         "simulated at a stated true skill. No real forecast enters this table.", "",
+        *(_recount_note(variant, dev, sem, obs_rules) if variant.name else ()),
         "## Inputs", "",
         f"- Observations: IMD 0.25° gridded daily rainfall, vintage `{vintage}`,",
         f"  {len(files)} files under `observations/`,",
         f"  set digest `{observations.files_digest(files)}`.",
-        f"- Band map: `{bands.BAND_MAP_PATH}`, SHA-256",
-        f"  `{hashlib.sha256((ledger_root / bands.BAND_MAP_PATH).read_bytes()).hexdigest()}`.",
+        *(line for area in dict.fromkeys(areas.values()) for line in (
+            f"- {'Band map' if area is main else 'Exploratory view'}: "
+            f"`{area.path.relative_to(ledger_root).as_posix()}`, SHA-256",
+            f"  `{hashlib.sha256(area.path.read_bytes()).hexdigest()}`.",
+        )),
         f"- Seasons: {years[0]} to {years[-1]} ({len(years)}); climatology leaves the scored season out.",
-        f"- Issue dates: each Monday from {sem.season_start[1]} Oct to {sem.season_end[1]} Nov; "
+        f"- Issue dates: each Monday from {observations.day_month(sem.season_start)} to "
+        f"{observations.day_month(sem.season_end)}; "
         f"{sem.rain_days}-day window; sowing cutoff {cutoff}.",
         f"- Coverage share {obs_rules.coverage_share:g}; wet day {_mm(obs_rules.wet_day_mm)}; dry-day gap "
         f"{obs_rules.dry_day_gap_days} days;",
@@ -319,27 +431,86 @@ def power(ledger_root: Path, design: Design = Design()) -> str:
         f"- Candidates: thresholds {_listed(design.thresholds_mm)} mm; minimum N {_listed(design.min_episodes)};",
         f"  confidence {_listed(design.confidences)}; margin {_listed(design.margins)};",
         f"  true skill {_listed(design.skills)}.", "",
+        *(_recount_checks(series, areas, pools, years, short, sem, obs_rules, design) if variant.name else ()),
     ]
-    for b, verdict_band in enumerate(band_map.verdict_bands):
-        band = obs_core.band_daily(series, band_map, verdict_band, obs_rules.coverage_share)
-        pools = {(e, t): observed_seasons(band, years, sem, obs_rules, event, threshold)
-                 for e, event in enumerate(EVENTS) for t, threshold in enumerate(design.thresholds_mm)}
-        # One job per event, threshold, season range, true skill and kind of errors, each with its
-        # own seed, so the table does not depend on how many processes share the work.
-        jobs = {
-            (e, t, r, k, x): ([s for s in pool if s.year >= first], pool, skill, errors, rules, design,
-                              [rules.bootstrap_seed, 1, b, e, t, r, k, x])
-            for (e, t), pool in pools.items()
-            for r, first in enumerate(design.simulated_first_years)
-            for k, skill in enumerate(design.skills)
-            for x, errors in enumerate(ERRORS)
-        }
+    for b, (band, area) in enumerate(areas.items()):
+        work = jobs(pools[band], b, rules, design, variant)
         with ProcessPoolExecutor() as workers:
-            results = dict(zip(jobs, workers.map(_simulate_seeded, jobs.values())))
-        out += [f"## Verdict band `{verdict_band}`", ""]
+            results = dict(zip(work, workers.map(_simulate_seeded, work.values())))
+        if area is main:
+            out += [f"## Verdict band `{band}`", ""]
+        else:
+            cells = ", ".join(f"{c.lat:.2f}N {c.lon:.2f}E" for c in area.band_map.cells)
+            out += [f"## Exploratory view `{band}`", "",
+                    "Not a verdict band: a view is read beside the verdict bands and never decides a verdict.",
+                    f"IMD cells: {cells}.", ""]
         for e, event in enumerate(EVENTS):
-            out += _event_tables(event, (b, e), pools, results, sem, cutoff, rules, design)
+            out += _event_tables(event, (b, e), pools[band], results, sem, cutoff, rules, design, variant)
     return "\n".join(out)
+
+
+def _recount_note(variant, dev, sem, obs_rules) -> list[str]:
+    day = observations.day_month
+    return [
+        f"This is a recount made on {variant.made}, after the first run, whose table is `{POWER_PATH}` and",
+        "is unchanged. It is listed under \"Changes after the run\" in the procedure. Two development",
+        f"values are changed in code, and no bundle holds them: the last issue date is {day(sem.season_end)}",
+        f"where the first run has {day(dev[0].season_end)}, and the sowing cutoff is {day(obs_rules.sowing_cutoff)} "
+        f"where it has",
+        f"{day(dev[1].sowing_cutoff)}. Every other value is the first run's. The exploratory views are counted after",
+        "the verdict band. Each row has a seed of its own, shared with no row of either table.", "",
+        "The owner has not chosen these values. The cutoff, the last issue date and the rule for",
+        "issue dates with no room before the cutoff (below) are the agent's and open for the owner.", "",
+    ]
+
+
+def _recount_checks(series, areas, pools, years, short, sem, obs_rules, design) -> list[str]:
+    """What a recount with later issue dates has to show about the observations it newly reads."""
+    day = observations.day_month
+    spans = [used_dates(sem, obs_rules, y) for y in years]
+    first, last = min((a.month, a.day) for a, _ in spans), max((b.month, b.day) for _, b in spans)
+    late = [m for m in range(first[0], last[0] + 1) if m not in observations.SEASON_MONTHS]
+    names = " and ".join(f"{date(2000, m, 1):%B}" for m in late)
+    out = ["## Observations the later issue dates use", ""]
+    if short:
+        out += [f"- Left out, for lacking a date their windows or climatology use ({day(first)} to {day(last)}",
+                "  at the widest): " + ", ".join(f"{y} ({n} dates)" for y, n in short.items()) + "."]
+    else:
+        out += [f"- Every season from {years[0]} to {years[-1]} has every date its windows and their climatology",
+                f"  use ({day(first)} to {day(last)} at the widest)."]
+    cutoff_event = next(iter(pools.values()))[EVENTS.index(BEFORE_CUTOFF), 0]
+    slots = sum(len(semantics.issue_dates(sem, y)) for y in years)
+    gone = sum(s.no_room for s in cutoff_event)
+    most = max(s.no_room for s in cutoff_event)
+    none = [str(s.year) for s in cutoff_event if not s.no_room]
+    latest = date(2000, *obs_rules.sowing_cutoff) - timedelta(days=sem.rain_days - 1)
+    out += [
+        f"- Rain before the cutoff needs {sem.rain_days} dates in a row from the window's first date to the cutoff.",
+        f"  A window that starts after {day((latest.month, latest.day))} has no room for them. Its issue date is "
+        "left out of",
+        "  that event and of that event's climatology, as an unverifiable one is, and is not counted",
+        f"  as not held. This leaves out {gone} of {slots} issue dates: at most {most} in a season, and none in",
+        f"  {', '.join(none) if none else 'no season'}. The 7-day event keeps every issue date.", "",
+        "Missing cell values over each area's cells, in every saved year:", "",
+        "| Area | Cells | Cell-days, October and November | Missing | Days with a missing cell "
+        f"| Cell-days, {names} | Missing | Days with a missing cell |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    for band, area in areas.items():
+        early = observations.missing_cells(series, area.band_map)
+        later = observations.missing_cells(series, area.band_map, tuple(late))
+        out.append(f"| `{band}` | {len(area.band_map.cells)} | {early[1]} | {early[0]} | {early[2]} "
+                   f"| {later[1]} | {later[0]} | {later[2]} |")
+    thresholds = ", ".join(_mm(t) for t in design.thresholds_mm)
+    out += ["", "Unverifiable issue dates, left out for a date with no band value:", "",
+            f"| Area | 7-day event | Rain before the cutoff, at {thresholds} |",
+            "|---|---|---|"]
+    for band in areas:
+        window = sum(s.unverifiable for s in pools[band][EVENTS.index(WINDOW), 0])
+        before = " / ".join(str(sum(s.unverifiable for s in pools[band][EVENTS.index(BEFORE_CUTOFF), t]))
+                            for t in range(len(design.thresholds_mm)))
+        out.append(f"| `{band}` | {window} | {before} |")
+    return [*out, ""]
 
 
 def _simulate_seeded(job) -> Power:
@@ -347,7 +518,7 @@ def _simulate_seeded(job) -> Power:
     return simulate(*arguments, np.random.default_rng(seed))
 
 
-def _event_tables(event, key, pools, results, sem, cutoff, rules, design) -> list[str]:
+def _event_tables(event, key, pools, results, sem, cutoff, rules, design, variant=FIRST_RUN) -> list[str]:
     b, e = key
     counted, until, passing, live = [], [], [], []
     for t, threshold in enumerate(design.thresholds_mm):
@@ -366,7 +537,7 @@ def _event_tables(event, key, pools, results, sem, cutoff, rules, design) -> lis
         positive, negative = episodes(pool)
         cells = []
         for n, min_episodes in enumerate(design.min_episodes):
-            rng = np.random.default_rng([rules.bootstrap_seed, 0, b, e, t, n])
+            rng = np.random.default_rng(until_seed(rules, variant, b, e, t, n))
             needed = seasons_until_judged(pool, min_episodes, design, rng)
             cells.append(f"over {design.season_cap}" if needed is None else f"{needed[0]:g} ({needed[1]:g})")
         until.append(f"| {_mm(threshold)} | {positive / len(pool):.2f} | {negative / len(pool):.2f} | "
@@ -428,11 +599,11 @@ def _event_tables(event, key, pools, results, sem, cutoff, rules, design) -> lis
     ]
 
 
-def write_power(*, repo: Path, check: bool, design: Design = Design()) -> int:
-    """Write the table, or with ``check`` exit 1 unless the committed one matches."""
+def write_power(*, repo: Path, check: bool, design: Design = Design(), variant: Variant = FIRST_RUN) -> int:
+    """Write ``variant``'s table, or with ``check`` exit 1 unless the committed one matches."""
     ledger_root = repo / "ledger" / observations.LEDGER
-    text = power(ledger_root, design)
-    path = ledger_root / POWER_PATH
+    text = power(ledger_root, design, variant)
+    path = ledger_root / variant.path
     if check:
         if path.exists() and path.read_text(encoding="utf-8") == text:
             print(f"reproduced {path.relative_to(repo)}")

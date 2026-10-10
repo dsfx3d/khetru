@@ -1,10 +1,13 @@
 """U8: the power simulation. Rainfall is synthetic; the committed IMD files are not read here."""
 
+import dataclasses
+import hashlib
 from datetime import date, timedelta
 
 import numpy as np
 import pytest
 
+from khetru_evidence import bands as B
 from khetru_evidence import bundle, cli, obs_core as O, observations, score_core as S, semantics
 from test_observations import DEV_BUNDLE, synthetic_ledger
 
@@ -14,6 +17,7 @@ SMALL = bundle.Design(
     season_cap=20,
 )
 YEARS = (1991, 2002, 2003)
+VIEW = "view-east-cell"
 
 
 @pytest.fixture
@@ -206,3 +210,160 @@ def test_bundle_power_command_runs_the_simulation(tmp_path, monkeypatch):
 
     assert cli.main(["bundle", "power", "--check", "--repo", str(tmp_path)]) == 0
     assert calls == [{"repo": tmp_path, "check": True}]
+
+
+# --- the December recount: issue dates to 14 Dec, cutoff 16 Dec, the views beside the district ----
+
+
+@pytest.fixture
+def december(sem, obs_rules):
+    return bundle.values(bundle.DECEMBER, sem, obs_rules)
+
+
+def test_december_variant_changes_the_last_issue_date_and_the_cutoff_only(sem, obs_rules, december):
+    late_sem, late_rules = december
+
+    assert semantics.issue_dates(late_sem, 2002) == [
+        date(2002, 10, 21), date(2002, 10, 28), date(2002, 11, 4), date(2002, 11, 11), date(2002, 11, 18),
+        date(2002, 11, 25), date(2002, 12, 2), date(2002, 12, 9),
+    ]
+    assert semantics.issue_dates(late_sem, 2003)[-1] == date(2003, 12, 8)
+    assert late_sem == dataclasses.replace(sem, season_end=(12, 14))
+    assert late_rules == dataclasses.replace(obs_rules, sowing_cutoff=(12, 16))
+    assert bundle.VARIANTS == {"december": bundle.DECEMBER}
+
+
+def test_first_run_keeps_the_development_values_and_its_seeds(sem, obs_rules, rules):
+    assert bundle.values(bundle.FIRST_RUN, sem, obs_rules) == (sem, obs_rules)
+    assert len(semantics.issue_dates(sem, 2002)) == 4
+    pools = {(e, 0): [season(1, 1)] for e in range(2)}
+
+    first = bundle.jobs(pools, 0, rules, SMALL, bundle.FIRST_RUN)
+
+    # The seed and the row's position: 1, band, event, threshold, range, skill, kind of errors.
+    assert [job[-1] for job in first.values()] == [
+        [20261008, 1, 0, e, 0, 0, k, x] for e in range(2) for k in range(2) for x in range(2)
+    ]
+    assert bundle.until_seed(rules, bundle.FIRST_RUN, 0, 1, 2, 3) == [20261008, 0, 0, 1, 2, 3]
+
+
+def test_no_row_of_the_december_variant_shares_a_seed_with_another(rules):
+    pools = {(e, 0): [season(1, 1)] for e in range(2)}
+    seeds = [
+        tuple(job[-1])
+        for variant, areas in ((bundle.FIRST_RUN, 1), (bundle.DECEMBER, 2))
+        for b in range(areas)
+        for job in bundle.jobs(pools, b, rules, SMALL, variant).values()
+    ] + [
+        tuple(bundle.until_seed(rules, variant, b, e, 0, n))
+        for variant, areas in ((bundle.FIRST_RUN, 1), (bundle.DECEMBER, 2))
+        for b in range(areas) for e in range(2) for n in range(2)
+    ]
+
+    assert len(set(seeds)) == len(seeds) == 3 * 8 + 3 * 4
+    # No seed is another with zeros added, which numpy would read as the same seed.
+    assert len({seed[:2] for seed in seeds}) == 4
+
+
+def test_an_issue_date_with_no_room_before_the_cutoff_is_left_out_of_that_event(december):
+    late_sem, late_rules = december
+    band = dry_but((date(2002, 12, 12), 12.0))
+
+    seasons = bundle.observed_seasons(band, YEARS, late_sem, late_rules, bundle.BEFORE_CUTOFF, 10.0)
+
+    # The window of 9 Dec starts on 11 Dec: no 7 dates fit by 16 Dec. That of 8 Dec 2003 runs 10 to 16 Dec.
+    assert [len(s.slots) for s in seasons] == [7, 7, 8]
+    assert [s.no_room for s in seasons] == [1, 1, 0]
+    assert seasons[1].slots[-1].issue_date == "2002-12-02"
+    # 2002 holds on every issue date that is left, so it has no negative episode.
+    assert {s.outcome for s in seasons[1].slots} == {O.HELD}
+    assert (seasons[1].positive, seasons[1].negative) == (1, 0)
+    # Climatology pools the starts with room only: 3 to 10 Dec in 1991 (dry) and in 2002 (all held).
+    assert seasons[2].slots[-1].climatology == 8.5 / 17
+    # The window event keeps every issue date.
+    windows = bundle.observed_seasons(band, YEARS, late_sem, late_rules, bundle.WINDOW, 10.0)
+    assert [(len(s.slots), s.no_room) for s in windows] == [(8, 0)] * 3
+
+
+def test_every_first_run_issue_date_has_room_before_the_cutoff(sem, obs_rules):
+    for year in range(1991, 2026):
+        seasons = bundle.observed_seasons(dry_but(), YEARS, sem, obs_rules, bundle.BEFORE_CUTOFF, 10.0)
+        assert [s.no_room for s in seasons] == [0, 0, 0]
+        last = semantics.issue_dates(sem, year)[-1]
+        assert bundle.has_room(O.imd_dates(semantics.schedule(sem, last))[0], sem.rain_days, obs_rules.sowing_cutoff)
+
+
+def test_a_season_is_counted_only_with_every_date_its_windows_use(december):
+    late_sem, late_rules = december
+    band = dry_but()
+
+    assert bundle.short_seasons(band, YEARS, late_sem, late_rules) == {}
+    # 9 Dec's window ends on 17 Dec, and climatology pools starts 7 days either side.
+    assert bundle.used_dates(late_sem, late_rules, 2002) == (date(2002, 10, 16), date(2002, 12, 24))
+    del band[date(2002, 12, 24)]
+    assert bundle.short_seasons(band, YEARS, late_sem, late_rules) == {2002: 1}
+
+
+def view_ledger(root):
+    power_ledger(root)
+    view = B.BandMap(cells=(B.Cell(31.5, 77.25, 100.0, 1.0, VIEW),), reason="")
+    (root / f"bands/{VIEW}.csv").write_bytes(B.encode(view))
+
+
+def test_first_run_table_does_not_read_a_view(tmp_path):
+    power_ledger(tmp_path)
+    text = bundle.power(tmp_path, SMALL)
+    view_ledger(tmp_path / "with-view")
+
+    assert bundle.power(tmp_path / "with-view", SMALL) == text == bundle.power(tmp_path, SMALL, bundle.FIRST_RUN)
+    assert "- Issue dates: each Monday from 15 Oct to 15 Nov; 7-day window; sowing cutoff 30 Nov." in text
+    assert text.startswith("# Mandi wheat power simulation\n\nGenerated by `evidence bundle power`; do not edit.")
+    assert "view" not in text and "December" not in text
+
+
+def test_december_table_counts_the_district_and_then_the_view(tmp_path):
+    view_ledger(tmp_path)
+
+    text = bundle.power(tmp_path, SMALL, bundle.DECEMBER)
+
+    assert text == bundle.power(tmp_path, SMALL, bundle.DECEMBER)
+    assert "Generated by `evidence bundle power --variant december`; do not edit." in text
+    assert "- Issue dates: each Monday from 15 Oct to 14 Dec; 7-day window; sowing cutoff 16 Dec." in text
+    assert "after the first run" in text and "No real forecast enters this table." in text
+    digest = hashlib.sha256((tmp_path / f"bands/{VIEW}.csv").read_bytes()).hexdigest()
+    assert f"`bands/{VIEW}.csv`, SHA-256\n  `{digest}`" in text
+    district, view = text.index("## Verdict band `district`"), text.index(f"## Exploratory view `{VIEW}`")
+    assert district < view
+    assert "## Verdict band `view" not in text
+    # 8 Mondays a season; the rain of 1 Nov 2002 falls on every cell, so both areas count alike.
+    assert text.count("| 10 mm | 1991–2003 | 3 | 24 | 1 | 4% | 1 | 4 | 1 |") == 2
+    # Rain before the cutoff: 9 Dec of 1991 and of 2002 have no room and are left out.
+    assert text.count("| 10 mm | 1991–2003 | 3 | 22 | 2 | 9% | 1 | 3 | 1 |") == 2
+    assert "leaves out 2 of 24 issue dates" in text
+    assert "| `district` | 2 | 366 | 0 | 0 | 186 | 0 | 0 |" in text
+    assert f"| `{VIEW}` | 1 | 183 | 0 | 0 | 93 | 0 | 0 |" in text
+    assert text.count("#### Hindcast pass rate by true skill") == 4
+
+
+def test_december_table_is_written_beside_the_first_run_table(tmp_path, capsys):
+    root = tmp_path / "ledger" / observations.LEDGER
+    view_ledger(root)
+    assert bundle.write_power(repo=tmp_path, check=False, design=SMALL) == 0
+    first = (root / bundle.POWER_PATH).read_bytes()
+
+    assert bundle.write_power(repo=tmp_path, check=True, design=SMALL, variant=bundle.DECEMBER) == 1
+    assert bundle.write_power(repo=tmp_path, check=False, design=SMALL, variant=bundle.DECEMBER) == 0
+    assert bundle.write_power(repo=tmp_path, check=True, design=SMALL, variant=bundle.DECEMBER) == 0
+    assert "wrote ledger/mandi-wheat/power-december.md" in capsys.readouterr().out
+    assert (root / bundle.POWER_PATH).read_bytes() == first
+    assert bundle.write_power(repo=tmp_path, check=True, design=SMALL) == 0
+
+
+def test_bundle_power_command_takes_a_variant(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(bundle, "write_power", lambda **options: calls.append(options) or 0)
+
+    assert cli.main(["bundle", "power", "--variant", "december", "--check", "--repo", str(tmp_path)]) == 0
+    assert calls == [{"repo": tmp_path, "check": True, "variant": bundle.DECEMBER}]
+    with pytest.raises(SystemExit):
+        cli.main(["bundle", "power", "--variant", "january", "--repo", str(tmp_path)])

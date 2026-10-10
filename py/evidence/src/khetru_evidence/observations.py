@@ -80,6 +80,12 @@ def _mm(threshold: float) -> str:
     return f"{threshold:g} mm"
 
 
+def day_month(value: tuple[int, int]) -> str:
+    """A (month, day) rule value as it is written in a table, like ``15 Nov``."""
+    month, day = value
+    return f"{day} {date(2000, month, 1):%b}"
+
+
 def base_rates(ledger_root: Path, vintage: str, provisional: str | None = None) -> str:
     """The base-rate table as Markdown, from the saved records of the final ``vintage``.
 
@@ -92,7 +98,7 @@ def base_rates(ledger_root: Path, vintage: str, provisional: str | None = None) 
     band_map = load_band_map(ledger_root)
     series = load(ledger_root, vintage)
     years = [y for y in full_years(series) if y >= rules.climatology_first_year]
-    cutoff = f"{rules.sowing_cutoff[1]} {date(2000, rules.sowing_cutoff[0], 1):%b}"
+    cutoff = day_month(rules.sowing_cutoff)
     issue = semantics.issue_dates(sem, years[0])[0]
     lead = (obs_core.imd_dates(semantics.schedule(sem, issue))[0] - issue).days
 
@@ -108,7 +114,7 @@ def base_rates(ledger_root: Path, vintage: str, provisional: str | None = None) 
         f"- Band map: `{bands.BAND_MAP_PATH}`, SHA-256",
         f"  `{hashlib.sha256((ledger_root / bands.BAND_MAP_PATH).read_bytes()).hexdigest()}`.",
         f"- Seasons: {years[0]} to {years[-1]} ({len(years)}).",
-        f"- Issue dates: each Monday from {sem.season_start[1]} Oct to {sem.season_end[1]} Nov;",
+        f"- Issue dates: each Monday from {day_month(sem.season_start)} to {day_month(sem.season_end)};",
         f"  the observed window is the {sem.rain_days} IMD dates starting {lead} days after it",
         "  (IMD's date D is the 24 hours ending 08:30 IST on D).",
         f"- Coverage share {rules.coverage_share:g}; wet day {_mm(rules.wet_day_mm)}; dry-day gap "
