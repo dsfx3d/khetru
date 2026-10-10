@@ -50,7 +50,7 @@ Licence, from the TIGGE licence page: ECMWF, DWD, ECCC, KMA, NCEP and UKMO field
 Checksums of the 2025 test files (kept outside the repo):
 
 - control: `4ae747e93c40a7e60fcbaefcef32f3af743c754828766d164fae217caaa160ad`
-- perturbed: `3637f9a16e26d8d6050c62445b377ce5aaf9e180f0584ee9dd25ffdddbaef5be`.
+- perturbed: `3637f9a16e26d8d6050c62445b377ce5aaf9e180f0584ee9dd25ffdddbaef5be`
 
 ## 2. Observations: IMD gridded rainfall
 
