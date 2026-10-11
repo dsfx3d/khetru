@@ -102,9 +102,14 @@ def main(argv: list[str] | None = None) -> int:
 
     bundle_cmd = commands.add_parser(
         "bundle", help="power: write the power simulation table from the saved observations, "
-        "or check it reproduces"
+        "or check it reproduces; --variant: a recount with later issue dates, in its own table"
     )
     bundle_cmd.add_argument("action", choices=("power",))
+    from khetru_evidence import bundle
+
+    bundle_cmd.add_argument("--variant", choices=tuple(bundle.VARIANTS),
+                            help="december: issue dates to 14 Dec, cutoff 16 Dec, the views too; "
+                            "writes power-december.md (default: the first run, power.md)")
     bundle_cmd.add_argument("--check", action="store_true", help="exit 1 unless the committed table matches")
     bundle_cmd.add_argument("--repo", type=Path, help="repository root (default: current repo)")
     bundle_cmd.set_defaults(run=_run_bundle)
@@ -251,7 +256,8 @@ def _run_score(args: argparse.Namespace) -> int:
 def _run_bundle(args: argparse.Namespace) -> int:
     from khetru_evidence import bundle
 
-    return bundle.write_power(repo=_repo_root(args), check=args.check)
+    recount = {"variant": bundle.VARIANTS[args.variant]} if args.variant else {}
+    return bundle.write_power(repo=_repo_root(args), check=args.check, **recount)
 
 
 def _run_same_record(args: argparse.Namespace) -> int:

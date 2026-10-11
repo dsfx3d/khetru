@@ -158,6 +158,12 @@ was committed before the first run, and a later change to it is listed there.
 A run takes about 15 minutes, so no test repeats it. The owner chooses the bundle v1 values from the table at
 U8.
 
+`evidence bundle power --variant december` writes `power-december.md`: a
+recount made on 2026-10-11, after the first run, with issue dates on every
+Monday to 14 Dec and a sowing cutoff of 16 Dec, for the district and then the
+exploratory view. It is evidence for the owner's choice of issue dates; the
+values are not adopted, no bundle holds them, and `power.md` is unchanged.
+
 ## Data attribution
 
 Observed rainfall: India Meteorological Department, 0.25° gridded daily
