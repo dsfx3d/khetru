@@ -2,6 +2,7 @@
 
 import dataclasses
 import hashlib
+import shutil
 from datetime import date, timedelta
 
 import numpy as np
@@ -18,6 +19,7 @@ SMALL = bundle.Design(
 )
 YEARS = (1991, 2002, 2003)
 VIEW = bundle.DECEMBER.views[0]
+LEDGER_ROOT = DEV_BUNDLE.parents[1]  # the committed ledger: its bundles and its tables, never its IMD files
 
 
 @pytest.fixture
@@ -230,7 +232,7 @@ def test_december_variant_changes_the_last_issue_date_and_the_cutoff_only(sem, o
     assert semantics.issue_dates(late_sem, 2003)[-1] == date(2003, 12, 8)
     assert late_sem == dataclasses.replace(sem, season_end=(12, 14))
     assert late_rules == dataclasses.replace(obs_rules, sowing_cutoff=(12, 16))
-    assert bundle.VARIANTS == {"december": bundle.DECEMBER}
+    assert bundle.VARIANTS == {"december": bundle.DECEMBER, "december-7": bundle.DECEMBER_7}
 
 
 def test_first_run_keeps_the_development_values_and_its_seeds(sem, obs_rules, rules):
@@ -409,3 +411,239 @@ def test_bundle_power_command_takes_a_variant(tmp_path, monkeypatch):
     monkeypatch.setitem(bundle.VARIANTS, "january", january)
     assert cli.main(["bundle", "power", "--variant", "january", "--repo", str(tmp_path)]) == 0
     assert calls[-1] == {"repo": tmp_path, "check": False, "variant": january}
+
+
+# --- the recount for the owner's issue dates: every Monday to 7 Dec, cutoff 16 Dec -----------------
+
+RUNS = ((bundle.FIRST_RUN, 1), (bundle.DECEMBER, 2), (bundle.DECEMBER_7, 2))  # each with its areas
+
+
+@pytest.fixture
+def december_7(sem, obs_rules):
+    return bundle.values(bundle.DECEMBER_7, sem, obs_rules)
+
+
+def test_december_7_variant_ends_on_the_last_monday_on_or_before_7_dec(sem, obs_rules, december_7):
+    chosen_sem, chosen_rules = december_7
+
+    assert chosen_sem == dataclasses.replace(sem, season_end=(12, 7))
+    assert chosen_rules == dataclasses.replace(obs_rules, sowing_cutoff=(12, 16))
+    assert semantics.issue_dates(chosen_sem, 2002) == [
+        date(2002, 10, 21), date(2002, 10, 28), date(2002, 11, 4), date(2002, 11, 11), date(2002, 11, 18),
+        date(2002, 11, 25), date(2002, 12, 2),
+    ]
+    lasts = set()
+    for year in range(1991, 2026):
+        issues = semantics.issue_dates(chosen_sem, year)
+        last = issues[-1]
+        assert last.weekday() == 0 and date(year, 12, 1) <= last <= date(year, 12, 7), last
+        # The first run's and the December recount's issue dates up to 7 Dec, and no other.
+        assert issues[:len(semantics.issue_dates(sem, year))] == semantics.issue_dates(sem, year)
+        late = semantics.issue_dates(bundle.values(bundle.DECEMBER, sem, obs_rules)[0], year)
+        assert issues == [d for d in late if d <= date(year, 12, 7)]
+        lasts.add((last.month, last.day))
+    assert max(lasts) == (12, 7) and min(lasts) == (12, 1)  # 7 Dec is a Monday in 1992; 1 Dec in 2003
+    assert (bundle.DECEMBER_7.name, bundle.DECEMBER_7.path) == ("december-7", "power-december-7.md")
+    assert (bundle.DECEMBER_7.views, bundle.DECEMBER_7.made) == (("view-foothill-cell",), "2026-10-11")
+
+
+def test_every_december_7_issue_date_has_room_and_no_window_ends_after_the_cutoff(december_7):
+    chosen_sem, chosen_rules = december_7
+    ends = set()
+    for year in range(1991, 2026):
+        for issue in semantics.issue_dates(chosen_sem, year):
+            window = O.imd_dates(semantics.schedule(chosen_sem, issue))
+            assert bundle.has_room(window[0], chosen_sem.rain_days, chosen_rules.sowing_cutoff), issue
+            assert window[-1] <= date(year, *chosen_rules.sowing_cutoff), issue
+            ends.add((window[-1].month, window[-1].day))
+    # The latest window is that of Monday 7 Dec: 9 to 15 Dec, one day before the cutoff.
+    assert max(ends) == (12, 15)
+    assert bundle._past_cutoff(range(1991, 2026), chosen_sem, chosen_rules) == {}
+    assert bundle._last_start(range(1991, 2026), chosen_sem, chosen_rules) == date(2000, 12, 9)
+
+    for event in bundle.EVENTS:
+        seasons = bundle.observed_seasons(dry_but((date(2002, 12, 5), 12.0)), YEARS, chosen_sem, chosen_rules,
+                                          event, 10.0)
+        assert [(len(s.slots), s.no_room) for s in seasons] == [(7, 0)] * 3
+    # 2002's last window, 4 to 10 Dec, holds the rain; so every issue date of 2002 has rain before the cutoff.
+    assert (seasons[1].positive, seasons[1].negative) == (1, 0)
+
+
+def test_the_existing_variants_keep_their_values_and_seed_streams():
+    assert bundle.FIRST_RUN == bundle.Variant(None, "power.md")
+    assert (bundle.FIRST_RUN.until_stream, bundle.FIRST_RUN.simulate_stream) == (0, 1)
+    december = bundle.DECEMBER
+    assert (december.name, december.path, december.made) == ("december", "power-december.md", "2026-10-11")
+    assert (december.season_end, december.sowing_cutoff, december.views) == ((12, 14), (12, 16), (VIEW,))
+    assert (december.until_stream, december.simulate_stream) == (2, 3)
+    assert (december.title, december.after, december.owner_chose, december.issued_from) == ("", (), "", "")
+
+
+def test_no_row_of_the_december_7_variant_shares_a_seed_with_another_run(rules):
+    pools = {(e, 0): [season(1, 1)] for e in range(2)}
+
+    def seeds(variant, areas):
+        return {tuple(job[-1]) for b in range(areas) for job in bundle.jobs(pools, b, rules, SMALL, variant).values()
+                } | {tuple(bundle.until_seed(rules, variant, b, e, 0, n))
+                     for b in range(areas) for e in range(2) for n in range(2)}
+
+    by_run = [seeds(variant, areas) for variant, areas in RUNS]
+
+    assert [len(s) for s in by_run] == [12, 24, 24]
+    assert len(set().union(*by_run)) == 60
+    # No seed is another with zeros added, which numpy would read as the same seed.
+    assert len({seed[:2] for s in by_run for seed in s}) == 6
+    streams = [stream for variant, _ in RUNS for stream in (variant.until_stream, variant.simulate_stream)]
+    assert streams == [0, 1, 2, 3, 4, 5]
+    # The existing runs' seeds, as they were.
+    assert seeds(bundle.DECEMBER, 1) == {(20261008, 3, 0, e, 0, 0, k, x) for e in range(2) for k in range(2)
+                                         for x in range(2)} | {(20261008, 2, 0, e, 0, n) for e in range(2)
+                                                               for n in range(2)}
+
+
+def test_december_7_table_says_whose_the_values_are_and_that_nothing_is_left_out(tmp_path):
+    view_ledger(tmp_path)
+    shutil.rmtree(tmp_path / "bundles/dev-2", ignore_errors=True)  # the table names this bundle and does not read it
+
+    text = bundle.power(tmp_path, SMALL, bundle.DECEMBER_7)
+
+    assert text == bundle.power(tmp_path, SMALL, bundle.DECEMBER_7)
+    assert text.startswith("# Mandi wheat power simulation: recount for issue dates to 7 Dec\n\n"
+                           "Generated by `evidence bundle power --variant december-7`; do not edit.")
+    assert "- Issue dates: each Monday from 15 Oct to 7 Dec; 7-day window; sowing cutoff 16 Dec." in text
+    header = " ".join(text[:text.index("## Verdict band")].split())
+    assert "No real forecast enters this table." in header
+    assert ("after the first run, whose table is `power.md`, and after the recount `power-december.md`. "
+            "Both tables are unchanged.") in header
+    assert "the last issue date is 7 Dec where the first run has 15 Nov" in header
+    assert "the sowing cutoff is 16 Dec where it has 30 Nov" in header
+    # Where the two values are held: not in `bundles/dev`, which the table reads; in `bundles/dev-2`, which it does not.
+    assert ("Two development values are changed in code: the last issue date is 7 Dec" in header
+            and "no bundle holds them" not in header)
+    assert ("Every other value is the first run's, read from `bundles/dev`, which holds neither changed value. "
+            "The development bundle `bundles/dev-2` holds the same two, for issuing claims; "
+            "this table does not read it.") in header
+    assert "No seed is shared with an earlier table or between the two areas." in header
+    # Whose the values are: the owner's issue dates, as a starting value; the cutoff is still the agent's.
+    assert ("The issue dates are the owner's choice, made on 2026-10-11 after reading `power-december.md`: "
+            "each Monday from 15 Oct to 7 Dec.") in header
+    assert "a starting value for bundle v1 and not a frozen one" in header
+    assert "The cutoff of 16 Dec is still the agent's choice and open for the owner." in header
+    assert "The owner has not chosen these values" not in header
+    # Nothing the 14 Dec table says of issue dates left out or windows past the cutoff is claimed here.
+    # 7 Mondays a season; the latest window of these three seasons starts on 4 Dec (issued 2 Dec).
+    assert "No issue date is left out of that event: 0 of 21. The latest window starts on 4 Dec." in header
+    assert ("The 7-day event is not cut at the cutoff. No window ends after it: 0 of 21. "
+            "The latest ends on 10 Dec.") in header
+    for gone in ("leaves out", "three options", "Left out", "shorter run", "windows end after it, on",
+                 "Windows ending after the cutoff", "none in"):
+        assert gone not in header, gone
+    # The starts pooled for 4 Dec run to 10 Dec, later than 4 Dec: so "those", not "the earlier ones".
+    assert ("pools fewer starts: only those that still have room. "
+            "For a window starting 4 Dec it pools the starts 27 Nov to 10 Dec, 14 of 15.") in header
+    assert "| `district` | 2 | 366 | 0 | 0 | 186 | 0 | 0 |" in text
+    district, view = text.index("## Verdict band `district`"), text.index(f"## Exploratory view `{VIEW}`")
+    assert district < view
+    # Both events keep all 21 issue dates in both areas; 21 and 28 Oct of 2002 have rain before the cutoff.
+    assert text.count("| 10 mm | 1991–2003 | 3 | 21 | 1 | 5% | 1 | 4 | 1 |") == 2
+    assert text.count("| 10 mm | 1991–2003 | 3 | 21 | 2 | 10% | 1 | 3 | 1 |") == 2
+    assert text.count("#### Hindcast pass rate by true skill") == 4
+
+
+def test_the_bundle_named_for_issuing_holds_the_december_7_values(sem, obs_rules, december_7):
+    variant = bundle.DECEMBER_7
+    held = LEDGER_ROOT / variant.issued_from
+
+    assert variant.issued_from == "bundles/dev-2"
+    assert (semantics.load(held / "bundle.toml").season_end, O.load_rules(held / "observations.toml").sowing_cutoff
+            ) == (variant.season_end, variant.sowing_cutoff) == ((12, 7), (12, 16))
+    # `bundles/dev`, which the simulation reads, holds neither.
+    assert (sem.season_end, obs_rules.sowing_cutoff) == ((11, 15), (11, 30))
+    assert observations.DEV_BUNDLE_DIR == "bundles/dev"
+
+
+def test_the_date_the_owner_chose_is_not_the_date_the_recount_was_made(sem, obs_rules):
+    variant = dataclasses.replace(bundle.DECEMBER_7, made="2026-10-20")
+    assert (bundle.DECEMBER_7.owner_chose, bundle.DECEMBER.owner_chose, bundle.FIRST_RUN.owner_chose
+            ) == ("2026-10-11", "", "")
+
+    note = " ".join(bundle._recount_note(variant, (sem, obs_rules), *bundle.values(variant, sem, obs_rules)))
+
+    assert "This is a recount made on 2026-10-20, after the first run" in note
+    assert "The issue dates are the owner's choice, made on 2026-10-11 after reading `power-december.md`:" in note
+
+
+def test_a_recount_of_the_owners_dates_made_after_no_other_recount_names_no_table_read(sem, obs_rules):
+    variant = dataclasses.replace(bundle.DECEMBER_7, after=())
+
+    note = " ".join(bundle._recount_note(variant, (sem, obs_rules), *bundle.values(variant, sem, obs_rules)))
+
+    assert "The issue dates are the owner's choice, made on 2026-10-11: each Monday from 15 Oct to 7 Dec." in note
+    assert "after reading" not in note
+    assert "whose table is `power.md` and is unchanged." in note
+
+
+def test_a_recount_made_after_two_others_names_both(sem, obs_rules):
+    variant = dataclasses.replace(bundle.DECEMBER_7, after=("power-december.md", "power-december-7.md"))
+
+    note = " ".join(bundle._recount_note(variant, (sem, obs_rules), *bundle.values(variant, sem, obs_rules)))
+
+    assert ("after the first run, whose table is `power.md`, and after the recounts `power-december.md` and "
+            "`power-december-7.md`. All these tables are unchanged.") in note
+    assert "Both tables" not in note
+
+
+def test_climatology_pools_every_start_when_each_has_room(tmp_path):
+    view_ledger(tmp_path)
+    # Issue dates to 15 Nov with a cutoff of 16 Dec: a window starts on 17 Nov at the latest, and the latest
+    # start its climatology then pools, 24 Nov, is before 10 Dec, the last start with room.
+    variant = bundle.Variant("late-cutoff", "power-late-cutoff.md", made="2026-10-11", sowing_cutoff=(12, 16),
+                             until_stream=6, simulate_stream=7)
+
+    text = bundle.power(tmp_path, SMALL, variant)
+
+    header = " ".join(text[:text.index("## Verdict band")].split())
+    assert "- The climatology of rain before the cutoff pools every start: each has room." in header
+    assert "pools fewer starts" not in header
+    assert "A window that starts after 10 Dec has no room for them, and none here does." in header
+
+
+def test_a_cutoff_that_leaves_no_window_room_is_an_error(sem, obs_rules):
+    early = dataclasses.replace(obs_rules, sowing_cutoff=(10, 20))  # the earliest window starts on 17 Oct
+
+    with pytest.raises(ValueError, match="no window has room for 7 dates before the sowing cutoff of 20 Oct"):
+        bundle._last_start(YEARS, sem, early)
+    assert bundle._last_start(YEARS, sem, obs_rules) == date(2000, 11, 13)  # the window of Monday 11 Nov 2002
+
+
+@pytest.mark.parametrize("variant", [bundle.FIRST_RUN, bundle.DECEMBER, bundle.DECEMBER_7], ids=lambda v: v.path)
+def test_each_table_opens_with_the_text_its_committed_file_has(tmp_path, variant):
+    """The text above "## Inputs" comes from the variant and the dev bundle, not from rainfall or the simulation."""
+    view_ledger(tmp_path)
+    committed = (LEDGER_ROOT / variant.path).read_text(encoding="utf-8")
+
+    text = bundle.power(tmp_path, SMALL, variant)
+
+    assert text[:text.index("## Inputs")] == committed[:committed.index("## Inputs")]
+
+
+def test_the_december_table_keeps_the_header_text_it_was_committed_with(tmp_path):
+    view_ledger(tmp_path)
+    committed = (LEDGER_ROOT / bundle.DECEMBER.path).read_text(encoding="utf-8")
+
+    header = bundle.power(tmp_path, SMALL, bundle.DECEMBER)
+
+    assert header.startswith("# Mandi wheat power simulation: December recount\n")
+    for line in (
+        "values are changed in code, and no bundle holds them: the last issue date is 14 Dec",
+        "30 Nov. Every other value is the first run's. The exploratory views named in the",
+        "No seed is shared between the two tables or between the two areas. The confidence and",
+        "The owner has not chosen these values. The cutoff, the last issue date and the rule for",
+        "  A window that starts after 10 Dec has no room for them. Its issue date is left out of",
+        "- There were three options for such an issue date: leave it out (taken here); count it as",
+        "- Near the season's end the climatology of rain before the cutoff pools fewer starts: only the",
+        "  earlier ones that still have room. For a window starting 10 Dec it pools the starts",
+        "  3 to 10 Dec, 8 of 15.",
+    ):
+        assert f"\n{line}\n" in header, line
+        assert f"\n{line}\n" in committed, line

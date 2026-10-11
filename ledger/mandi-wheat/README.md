@@ -210,6 +210,17 @@ Monday to 14 Dec and a sowing cutoff of 16 Dec, for the district and then the
 exploratory view. It is evidence for the owner's choice of issue dates; the
 values are not adopted, no bundle holds them, and `power.md` is unchanged.
 
+`evidence bundle power --variant december-7` writes `power-december-7.md`: a
+second recount made on 2026-10-11, with issue dates on every Monday to 7 Dec
+and a sowing cutoff of 16 Dec, for the district and then the exploratory view.
+These are the issue dates the owner chose after reading `power-december.md`,
+as the starting value for bundle v1; the owner freezes the values at the tag.
+The 16 Dec cutoff is still the agent's choice and open for the owner. The
+simulation changes the two values in code and reads every other value from
+`bundles/dev`, which holds neither. The development bundle `bundles/dev-2`
+holds the same two values, for issuing rabi 2026 claims; the simulation does
+not read it. `power.md` and `power-december.md` are unchanged.
+
 ## Data attribution
 
 Observed rainfall: India Meteorological Department, 0.25° gridded daily
