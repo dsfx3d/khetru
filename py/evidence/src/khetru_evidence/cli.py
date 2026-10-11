@@ -88,7 +88,8 @@ def main(argv: list[str] | None = None) -> int:
     issue_cmd.add_argument("--year", type=int, help="--backfill-missing: season year (default: this year, UTC)")
     issue_cmd.add_argument("--bundle", default=CURRENT_DEV_BUNDLE,
                            help=f"bundle name (default: {CURRENT_DEV_BUNDLE}, the current development bundle; "
-                           "entries under dev or any dev-* bundle are exploratory)")
+                           "entries under dev or any dev-* bundle are exploratory, and any other bundle "
+                           "needs its tag recorded in tags.jsonl)")
     issue_cmd.add_argument("--ledger", default="mandi-wheat")
     issue_cmd.add_argument("--repo", type=Path, help="repository root (default: current repo)")
     issue_cmd.set_defaults(run=_run_issue)
@@ -186,6 +187,21 @@ def _run_observe(args: argparse.Namespace) -> int:
     return fetch_observations.fetch_realtime(*args.dates, repo=repo)
 
 
+def _untagged(ledger: Ledger, bundles) -> str | None:
+    """Why live entries under ``bundles`` are refused: the first one with no recorded tag, or None.
+
+    A development bundle is known by its name alone, so without this a mistyped
+    name (``dev2``, ``dev_2``) would be taken for a bundle that issues live.
+    """
+    from khetru_evidence import scoring
+
+    for bundle in sorted(set(bundles)):
+        if not scoring.is_tagged(ledger, bundle):
+            return (f"bundle {bundle} is not a development bundle (dev, dev-*) and has no tag recorded in "
+                    "tags.jsonl; live entries are written under a tagged bundle only")
+    return None
+
+
 def _run_issue(args: argparse.Namespace) -> int:
     from khetru_evidence import claims
 
@@ -199,6 +215,10 @@ def _run_issue(args: argparse.Namespace) -> int:
                 print(problem, file=sys.stderr)
             print(f"evidence issue: {len(problems)} problem(s)" if problems else "evidence issue: ok")
             return 1 if problems else 0
+        refusal = _untagged(ledger, [args.bundle]) if kind == "live" else None
+        if refusal:
+            print(f"evidence issue: {refusal}", file=sys.stderr)
+            return 2
         # Live entries are written by the GitHub workflows only (KTD12).
         if kind == "live" and os.environ.get("GITHUB_ACTIONS") != "true":
             print("evidence issue: live entries are never written from a local machine", file=sys.stderr)
@@ -238,6 +258,10 @@ def _run_score(args: argparse.Namespace) -> int:
             print("evidence score: live entries are never written from a local machine", file=sys.stderr)
             return 2
         rel = claims.kind_file(args.kind)
+        refusal = _untagged(ledger, [e["bundle"] for e in ledger.read(rel)]) if args.kind == "live" else None
+        if refusal:
+            print(f"evidence score: {refusal}", file=sys.stderr)
+            return 2
         code = _git(repo, "rev-parse", "HEAD").decode().strip()
         written = scoring.score(ledger, rel, vintage=args.vintage, code=code)
     except ValueError as e:  # score, ledger, record and band-map errors

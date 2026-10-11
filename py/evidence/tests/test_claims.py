@@ -209,7 +209,8 @@ def test_check_reports_a_claim_whose_evidence_file_changed(ledger):
 
 def test_the_issue_command_never_writes_live_entries_from_a_local_machine(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
-    make_ledger(tmp_path / "ledger/mandi-wheat", AFTER_RUN)
+    lg = make_ledger(tmp_path / "ledger/mandi-wheat", AFTER_RUN)
+    lg.append("tags.jsonl", L.tag(ledger=lg.name, name="mandi-wheat/bundle-v1", commit=CODE))
     status = cli.main(["issue", "--date", "2026-10-19", "--bundle", "v1", "--repo", str(tmp_path)])
     assert status == 2
     assert "never written from a local machine" in capsys.readouterr().err
@@ -294,13 +295,52 @@ def test_the_backfill_command_uses_dev_2_unless_told_another_bundle(command):
                        for day in ("2026-10-19", "2026-10-26", "2026-11-02", "2026-11-09")]
 
 
-def test_a_development_bundle_is_exploratory_on_a_workflow_and_any_other_name_is_live(command, tmp_path, monkeypatch):
+def test_on_a_workflow_a_development_bundle_is_exploratory_and_any_other_name_is_live_only_once_tagged(
+        command, tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
-    bundles = tmp_path / "ledger/mandi-wheat/bundles"
-    shutil.copytree(bundles / "dev-2", bundles / "devel")
-    assert command("--date", "2026-11-16", "--bundle", "dev-2") == (
-        0, [("claim", "mandi-wheat:exploratory:dev-2:district:2026-11-16")])
-    assert command("--date", "2026-11-16", "--bundle", "devel") == (0, [
-        ("claim", "mandi-wheat:exploratory:dev-2:district:2026-11-16"),
-        ("claim", "mandi-wheat:live:devel:district:2026-11-16"),
-    ])
+    root = tmp_path / "ledger/mandi-wheat"
+    under_dev_2 = [("claim", "mandi-wheat:exploratory:dev-2:district:2026-11-16")]
+    assert command("--date", "2026-11-16", "--bundle", "dev-2") == (0, under_dev_2)
+    # A name that only looks like a development bundle's is not one, and issues nothing as live.
+    for name in ("dev2", "devel", "dev_2", "v1"):
+        shutil.copytree(root / "bundles/dev-2", root / "bundles" / name)
+        for action in (["--date", "2026-11-16"], ["--backfill-missing", "--year", "2026"]):
+            assert command(*action, "--bundle", name) == (2, under_dev_2)
+            assert (f"bundle {name} is not a development bundle (dev, dev-*) and has no tag recorded in tags.jsonl"
+                    in capsys.readouterr().err)
+    L.Ledger(root).append("tags.jsonl", L.tag(ledger="mandi-wheat", name="mandi-wheat/bundle-v1", commit=CODE))
+    assert command("--date", "2026-11-16", "--bundle", "v1") == (0, [
+        *under_dev_2, ("claim", "mandi-wheat:live:v1:district:2026-11-16")])
+    assert command("--date", "2026-11-16", "--bundle", "devel")[0] == 2
+
+
+# --- one development bundle per issue date -------------------------------------
+
+
+def test_a_date_that_one_development_bundle_holds_is_refused_under_another(ledger):
+    issue(ledger)
+    before = (ledger.root / EXPLORATORY).read_bytes()
+    with pytest.raises(C.ClaimError, match="2026-10-19 already has a district slot under development bundle dev;"):
+        issue(ledger, bundle="dev-2")
+    with pytest.raises(C.ClaimError, match="under development bundle dev;"):
+        issue(ledger, bundle="dev-2", abstain_if_missing=True)
+    assert (ledger.root / EXPLORATORY).read_bytes() == before
+    # Issuing it again under its own bundle is still nothing to write, and a bundle that issues live is not held up.
+    assert issue(ledger) == []
+    shutil.copytree(ledger.root / "bundles/dev", ledger.root / "bundles/v1")
+    assert [e["id"] for e in issue(ledger, bundle="v1", kind="live")] == ["mandi-wheat:live:v1:district:2026-10-19"]
+
+
+def test_backfill_leaves_a_date_that_another_development_bundle_holds_alone(tmp_path):
+    # 27 Oct 12:00: the 19 and 26 Oct windows have started.
+    lg = make_ledger(tmp_path / "mandi-wheat", datetime(2026, 10, 27, 12, tzinfo=UTC))
+    fc.write_record(lg.root, record(TOTALS_30_OF_51))
+    issue(lg, bundle="dev-2")
+    written = claims.backfill_missing(lg, 2026, bundle="dev", kind="exploratory")
+    assert [(e["type"], e["bundle"], e["issue_date"]) for e in written] == [("not_issued", "dev", "2026-10-26")]
+    # A not_issued slot holds its date as a claim does.
+    assert claims.backfill_missing(lg, 2026, bundle="dev-2", kind="exploratory") == []
+    fc.write_record(lg.root, record(TOTALS_30_OF_51, init=datetime(2026, 10, 26, tzinfo=UTC)))
+    with pytest.raises(C.ClaimError, match="2026-10-26 already has a district slot under development bundle dev;"):
+        issue(lg, date(2026, 10, 26), bundle="dev-2")
+    assert [(e["type"], e["bundle"]) for e in lg.read(EXPLORATORY)] == [("claim", "dev-2"), ("not_issued", "dev")]

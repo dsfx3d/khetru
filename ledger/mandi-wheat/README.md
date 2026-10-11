@@ -23,7 +23,11 @@ A bundle is a directory of rule values under `bundles/`. A development bundle
 is untagged: every entry made under it is `exploratory`, and the ledger refuses
 any other kind. A bundle is a development bundle when its name is `dev` or
 starts with `dev-`. Under any other name `evidence issue` writes `live`
-entries, on the GitHub workflows only.
+entries, on the GitHub workflows only, and only when the bundle's tag is
+recorded in `tags.jsonl`. A name that is neither, such as `dev2` or `dev_2`,
+is refused: "bundle dev2 is not a development bundle (dev, dev-*) and has no
+tag recorded in tags.jsonl". `evidence score --kind live` refuses the same way
+when a claim in `claims/live.jsonl` names an untagged bundle.
 
 There are two, because files under `bundles/` are write-once:
 
@@ -39,9 +43,12 @@ There are two, because files under `bundles/` are write-once:
 
 `evidence issue` uses `dev-2` unless `--bundle` names another, so the weekly
 commands below issue the whole rabi 2026 season under `dev-2`. `--bundle dev`
-still works for the dates `dev` holds. Do not issue or backfill the same date
-under both. `evidence score` takes no bundle: it scores each claim by the
-bundle the claim names.
+still works for the dates `dev` holds. A band and issue date are held under
+one development bundle only, so no date is scored twice: `evidence issue
+--date` fails when another development bundle already holds the date ("already
+has a district slot under development bundle dev"), and `--backfill-missing`
+writes nothing for such a date. `evidence score` takes no bundle: it scores
+each claim by the bundle the claim names.
 
 Both hold development values. The owner chooses the bundle v1 values at U8.
 
@@ -135,9 +142,10 @@ Each entry names the bundle files, band map and forecast record it was made
 from by SHA-256 under `evidence`, and the commit of the code under `code`.
 
 - `uv run --all-packages evidence issue --date 2026-10-19` appends that issue
-  date's claim per verdict band from the saved 00 UTC run, under `dev-2`. Issuing a date again
-  writes nothing. With no saved run it fails; `--abstain-if-missing` records
-  "can't tell — no forecast coverage for this band" instead.
+  date's claim per verdict band from the saved 00 UTC run, under `dev-2`.
+  Issuing a date again writes nothing. With no saved run it fails;
+  `--abstain-if-missing` records "can't tell — no forecast coverage for this
+  band" instead.
 - `uv run --all-packages evidence issue --backfill-missing` records `not_issued`
   for every issue date whose window has started with no entry. It never writes
   a claim, and a slot marked `not_issued` stays that way.
@@ -155,7 +163,10 @@ values at U8. Live entries are written by the GitHub workflows only.
 the band's rain on each IMD date of the window, the outcome (`held`,
 `not_held`, or `unverifiable` when a date has no band value), the probability
 that is scored, and climatology's probability for the same window, from the
-final vintage the bundle names with the claim's own season left out. An
+final vintage the bundle names with the claim's own season left out. A season
+of that vintage counts only when it holds every date of the months the
+bundle's windows and sowing cutoff use (October to December for `dev-2`), and
+a score is refused when no season does. An
 abstain, a `not_issued` slot, a voided claim and a late claim are scored as if
 they had stated climatology's probability. Brier scores are not stored; they
 follow from the outcome and the two probabilities. Each score names the files
@@ -170,8 +181,9 @@ it was made from by SHA-256 under `evidence`.
   the files it names and fails if one differs.
 
 The command prints outcomes and counts only. Skill against climatology is read
-through `khetru_evidence.scoring.standing`, which refuses a bundle with no tag
-recorded in `tags.jsonl`, so rabi 2026 development data never shows it. The
+through `khetru_evidence.scoring.standing`, which refuses a development bundle
+whatever tag is recorded, and any bundle with no tag recorded in `tags.jsonl`,
+so rabi 2026 development data never shows it. The
 pass/fail rule values in `bundles/dev/scoring.toml` and
 `bundles/dev-2/scoring.toml` are the same placeholders; the owner
 chooses the bundle v1 values at U8. A live claim's score waits for the
