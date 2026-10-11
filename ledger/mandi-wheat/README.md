@@ -38,8 +38,8 @@ There are two, because files under `bundles/` are write-once:
   issue dates run to 7 Dec, so its issue dates are the Mondays from 15 Oct to
   7 Dec: in 2026, 19 and 26 Oct, 2, 9, 16, 23 and 30 Nov, and 7 Dec. Its sowing
   cutoff is 16 Dec, the end of the last sowing week in the CSK HPKV guidance
-  this project uses; that date is an agent's choice, open for the owner. Every
-  other value is `dev`'s.
+  this project uses; an agent chose that date and the owner accepted it on
+  2026-10-11, as a starting value for bundle v1. Every other value is `dev`'s.
 
 `evidence issue` uses `dev-2` unless `--bundle` names another, so the weekly
 commands below issue the whole rabi 2026 season under `dev-2`. `--bundle dev`
@@ -215,7 +215,9 @@ second recount made on 2026-10-11, with issue dates on every Monday to 7 Dec
 and a sowing cutoff of 16 Dec, for the district and then the exploratory view.
 These are the issue dates the owner chose after reading `power-december.md`,
 as the starting value for bundle v1; the owner freezes the values at the tag.
-The 16 Dec cutoff is still the agent's choice and open for the owner. The
+The table's header calls the 16 Dec cutoff the agent's choice and open for the
+owner: it was when the table was made. The owner accepted it later that day,
+as a starting value too, and the table is not written again for that. The
 simulation changes the two values in code and reads every other value from
 `bundles/dev`, which holds neither. The development bundle `bundles/dev-2`
 holds the same two values, for issuing rabi 2026 claims; the simulation does
