@@ -17,6 +17,34 @@ The owner sets up a GitHub ruleset on `github.com/dsfx3d/khetru`
 `verify` also fails when a tag recorded in `tags.jsonl` no longer resolves to
 its recorded commit, so a moved tag is caught even without the ruleset.
 
+## Development bundles
+
+A bundle is a directory of rule values under `bundles/`. A development bundle
+is untagged: every entry made under it is `exploratory`, and the ledger refuses
+any other kind. A bundle is a development bundle when its name is `dev` or
+starts with `dev-`. Under any other name `evidence issue` writes `live`
+entries, on the GitHub workflows only.
+
+There are two, because files under `bundles/` are write-once:
+
+- `bundles/dev/` is the first. Its issue dates are the Mondays from 15 Oct to
+  15 Nov and its sowing cutoff is 30 Nov. It is not edited. `base-rates.md`,
+  `power.md` and `power-december.md` are made from it and still reproduce.
+- `bundles/dev-2/` is the current one. On 2026-10-11 the owner decided that
+  issue dates run to 7 Dec, so its issue dates are the Mondays from 15 Oct to
+  7 Dec: in 2026, 19 and 26 Oct, 2, 9, 16, 23 and 30 Nov, and 7 Dec. Its sowing
+  cutoff is 16 Dec, the end of the last sowing week in the CSK HPKV guidance
+  this project uses; that date is an agent's choice, open for the owner. Every
+  other value is `dev`'s.
+
+`evidence issue` uses `dev-2` unless `--bundle` names another, so the weekly
+commands below issue the whole rabi 2026 season under `dev-2`. `--bundle dev`
+still works for the dates `dev` holds. Do not issue or backfill the same date
+under both. `evidence score` takes no bundle: it scores each claim by the
+bundle the claim names.
+
+Both hold development values. The owner chooses the bundle v1 values at U8.
+
 ## Forecast inputs
 
 `inputs/ens-<source>-<YYYYMMDDHH>.json.gz` holds one ECMWF ENS run each
@@ -88,10 +116,14 @@ rain-day ending 03:00 UTC on D is therefore IMD's date D.
 - `uv run --all-packages evidence observe base-rates --vintage <final vintage> [--provisional <real-time vintage>]`
   writes `base-rates.md`; with `--check` it fails unless the committed table
   matches. The tests run the same check.
+- The same command with `--bundle dev-2` writes or checks
+  `base-rates-dev-2.md`.
 
-`base-rates.md` uses the development rule values in
-`bundles/dev/observations.toml`. They are placeholders; the owner chooses the
-bundle v1 values at U8.
+`base-rates.md` uses the development rule values in `bundles/dev/`: issue
+dates to 15 Nov, sowing cutoff 30 Nov. `base-rates-dev-2.md` uses those in
+`bundles/dev-2/`: issue dates to 7 Dec, sowing cutoff 16 Dec, and missing cell
+values counted through December. Both read the IMD observations only. The
+values are placeholders; the owner chooses the bundle v1 values at U8.
 
 ## Claims
 
@@ -103,7 +135,7 @@ Each entry names the bundle files, band map and forecast record it was made
 from by SHA-256 under `evidence`, and the commit of the code under `code`.
 
 - `uv run --all-packages evidence issue --date 2026-10-19` appends that issue
-  date's claim per verdict band from the saved 00 UTC run. Issuing a date again
+  date's claim per verdict band from the saved 00 UTC run, under `dev-2`. Issuing a date again
   writes nothing. With no saved run it fails; `--abstain-if-missing` records
   "can't tell — no forecast coverage for this band" instead.
 - `uv run --all-packages evidence issue --backfill-missing` records `not_issued`
@@ -112,8 +144,9 @@ from by SHA-256 under `evidence`, and the commit of the code under `code`.
 - `uv run --all-packages evidence issue --check` re-derives every claim from
   the files it names and fails if one differs.
 
-Entries under the `dev` bundle are `exploratory`. Its claim rule values in
-`bundles/dev/claims.toml` are placeholders; the owner chooses the bundle v1
+Entries under a development bundle (`dev`, `dev-2`) are `exploratory`. The
+claim rule values in `bundles/dev-2/claims.toml`, the same as in
+`bundles/dev/claims.toml`, are placeholders; the owner chooses the bundle v1
 values at U8. Live entries are written by the GitHub workflows only.
 
 ## Scores
@@ -139,7 +172,8 @@ it was made from by SHA-256 under `evidence`.
 The command prints outcomes and counts only. Skill against climatology is read
 through `khetru_evidence.scoring.standing`, which refuses a bundle with no tag
 recorded in `tags.jsonl`, so rabi 2026 development data never shows it. The
-pass/fail rule values in `bundles/dev/scoring.toml` are placeholders; the owner
+pass/fail rule values in `bundles/dev/scoring.toml` and
+`bundles/dev-2/scoring.toml` are the same placeholders; the owner
 chooses the bundle v1 values at U8. A live claim's score waits for the
 OpenTimestamps proof of when it was made; there is no stamping yet (U8), so
 live claims are not scored. Exploratory and hindcast claims are timed by when
