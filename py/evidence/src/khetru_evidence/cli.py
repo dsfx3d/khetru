@@ -7,7 +7,9 @@ import sys
 from datetime import UTC, date, datetime
 from pathlib import Path, PurePosixPath
 
-from khetru_evidence.ledger import DEV_BUNDLE, MANIFEST_DIR, OUTCOMES, WRITE_ONCE_DIRS, Ledger
+from khetru_evidence.ledger import (
+    CURRENT_DEV_BUNDLE, DEV_BUNDLE, MANIFEST_DIR, OUTCOMES, WRITE_ONCE_DIRS, Ledger, is_development,
+)
 
 LEDGERS_DIR = "ledger"
 
@@ -67,6 +69,9 @@ def main(argv: list[str] | None = None) -> int:
     observe_cmd.add_argument("--provisional", help="base-rates: a real-time vintage to set beside it")
     observe_cmd.add_argument("--check", action="store_true",
                              help="base-rates: exit 1 unless the committed table matches")
+    observe_cmd.add_argument("--bundle", default=DEV_BUNDLE,
+                             help="base-rates: the bundle whose rule values to use (default: dev, which "
+                             "writes base-rates.md; another bundle writes base-rates-<bundle>.md)")
     observe_cmd.add_argument("--repo", type=Path, help="repository root (default: current repo)")
     observe_cmd.set_defaults(run=_run_observe)
 
@@ -81,8 +86,9 @@ def main(argv: list[str] | None = None) -> int:
     issue_cmd.add_argument("--abstain-if-missing", action="store_true",
                            help="--date: with no saved run, record an abstain instead of failing")
     issue_cmd.add_argument("--year", type=int, help="--backfill-missing: season year (default: this year, UTC)")
-    issue_cmd.add_argument("--bundle", default=DEV_BUNDLE,
-                           help="bundle name (default: dev, whose entries are exploratory)")
+    issue_cmd.add_argument("--bundle", default=CURRENT_DEV_BUNDLE,
+                           help=f"bundle name (default: {CURRENT_DEV_BUNDLE}, the current development bundle; "
+                           "entries under dev or any dev-* bundle are exploratory)")
     issue_cmd.add_argument("--ledger", default="mandi-wheat")
     issue_cmd.add_argument("--repo", type=Path, help="repository root (default: current repo)")
     issue_cmd.set_defaults(run=_run_issue)
@@ -164,7 +170,8 @@ def _run_observe(args: argparse.Namespace) -> int:
             print("evidence observe base-rates: --vintage is required", file=sys.stderr)
             return 2
         return observations.write_base_rates(
-            repo=repo, vintage=args.vintage, provisional=args.provisional, check=args.check
+            repo=repo, vintage=args.vintage, provisional=args.provisional, check=args.check,
+            bundle=args.bundle,
         )
     from khetru_evidence import fetch_observations
 
@@ -184,7 +191,7 @@ def _run_issue(args: argparse.Namespace) -> int:
 
     repo = _repo_root(args)
     ledger = Ledger(repo / LEDGERS_DIR / args.ledger)
-    kind = "exploratory" if args.bundle == DEV_BUNDLE else "live"
+    kind = "exploratory" if is_development(args.bundle) else "live"
     try:
         if args.check:
             problems = [p for rel in claims.claim_files(ledger) for p in claims.check(ledger, rel)]

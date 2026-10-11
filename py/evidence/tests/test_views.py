@@ -288,7 +288,7 @@ def test_the_commands_issue_score_and_check_the_view_and_print_no_brier_or_skill
     monkeypatch.setattr(cli, "Ledger", lambda root: L.Ledger(root, clock=lambda: AFTER_WINDOW))
     repo = ["--repo", str(tmp_path)]
 
-    assert cli.main(["issue", "--date", "2026-10-19", *repo]) == 0
+    assert cli.main(["issue", "--date", "2026-10-19", "--bundle", "dev", *repo]) == 0
     assert capsys.readouterr().out.splitlines() == [
         "evidence issue: claim mandi-wheat:exploratory:dev:district:2026-10-19: "
         "≥10 mm rain in band district within 7 days: 57%",

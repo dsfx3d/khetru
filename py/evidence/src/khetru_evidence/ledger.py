@@ -29,7 +29,13 @@ SLOT_TYPES = ("claim", "abstain", "not_issued")
 CORRECTION_ACTIONS = ("void", "fix")
 WRITE_ONCE_DIRS = ("inputs", "observations", "bands", "bundles", "stamps")
 MANIFEST_DIR = "manifests"
+# Development bundles are untagged, and every entry under one is exploratory.
+# ``is_development`` is the one rule for which bundles those are. ``dev`` is the
+# first; bundles/ is write-once, so changed development values go in a new
+# bundle, and the commands default to the current one.
 DEV_BUNDLE = "dev"
+DEV_BUNDLE_PREFIX = "dev-"
+CURRENT_DEV_BUNDLE = "dev-2"
 # A band named with this prefix is an exploratory view, never a verdict band (see ``views``).
 VIEW_PREFIX = "view-"
 # Claim fields a correction may fix. Everything else can affect scoring, so a
@@ -55,6 +61,11 @@ Clock = Callable[[], datetime]
 
 class LedgerError(ValueError):
     """An entry or file breaks a ledger invariant; nothing was written."""
+
+
+def is_development(bundle: str) -> bool:
+    """Whether ``bundle`` names a development bundle: ``dev``, or any name starting with ``dev-``."""
+    return bundle == DEV_BUNDLE or bundle.startswith(DEV_BUNDLE_PREFIX)
 
 
 def system_clock() -> datetime:
@@ -293,8 +304,8 @@ def validate(e: dict) -> None:
 def _validate_kind(e: dict) -> None:
     if e["kind"] not in KINDS:
         raise LedgerError(f"kind must be one of {', '.join(KINDS)}")
-    if e["bundle"] == DEV_BUNDLE and e["kind"] != "exploratory":
-        raise LedgerError("dev bundle entries are always exploratory")
+    if is_development(e["bundle"]) and e["kind"] != "exploratory":
+        raise LedgerError("development bundle (dev, dev-*) entries are always exploratory")
     if e["kind"] != "exploratory" and any(band.startswith(VIEW_PREFIX) for band in _bands(e)):
         raise LedgerError("view band entries are always exploratory")
     if e["kind"] == "hindcast" and not isinstance(e.get("run_id"), str):

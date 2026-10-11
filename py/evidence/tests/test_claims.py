@@ -1,6 +1,7 @@
 """U6: the claim core and the live/exploratory driver. Forecast records are synthetic."""
 
 import dataclasses
+import shutil
 from datetime import UTC, date, datetime
 
 import pytest
@@ -213,3 +214,93 @@ def test_the_issue_command_never_writes_live_entries_from_a_local_machine(tmp_pa
     assert status == 2
     assert "never written from a local machine" in capsys.readouterr().err
     assert not (tmp_path / "ledger/mandi-wheat/claims").exists()
+
+
+# --- the second development bundle --------------------------------------------
+
+LATE_MONDAY = date(2026, 11, 16)  # the first Monday after the first development bundle's last issue date
+LATE_NOW = datetime(2026, 11, 16, 10, 30, tzinfo=UTC)
+
+
+def late_ledger(root):
+    lg = make_ledger(root, LATE_NOW)
+    fc.write_record(lg.root, record(TOTALS_30_OF_51, init=datetime(2026, 11, 16, tzinfo=UTC)))
+    return lg
+
+
+def test_a_monday_after_15_nov_is_issued_under_dev_2_and_refused_under_dev(tmp_path):
+    lg = late_ledger(tmp_path / "mandi-wheat")
+    with pytest.raises(ValueError, match="2026-11-16 is not an issue date"):
+        issue(lg, LATE_MONDAY)
+    assert not (lg.root / EXPLORATORY).exists()
+    [entry] = issue(lg, LATE_MONDAY, bundle="dev-2")
+    assert entry["id"] == "mandi-wheat:exploratory:dev-2:district:2026-11-16"
+    assert (entry["type"], entry["kind"], entry["bundle"]) == ("claim", "exploratory", "dev-2")
+    assert sorted(entry["evidence"]) == [
+        "bands/band-map.csv", "bundles/dev-2/bundle.toml", "bundles/dev-2/claims.toml",
+        "bundles/dev-2/observations.toml", "inputs/ens-opendata-2026111600.json.gz",
+    ]
+    assert claims.check(lg, EXPLORATORY) == []
+
+
+def test_a_dev_2_claim_is_refused_as_live(tmp_path):
+    lg = late_ledger(tmp_path / "mandi-wheat")
+    with pytest.raises(L.LedgerError, match="development bundle"):
+        issue(lg, LATE_MONDAY, bundle="dev-2", kind="live")
+    assert not (lg.root / "claims").exists()
+
+
+def test_backfill_under_dev_2_covers_the_mondays_after_15_nov(tmp_path):
+    # 24 Nov 12:00: every window to 23 Nov has started; 30 Nov and 7 Dec have not.
+    lg = make_ledger(tmp_path / "mandi-wheat", datetime(2026, 11, 24, 12, tzinfo=UTC))
+    written = claims.backfill_missing(lg, 2026, bundle="dev-2", kind="exploratory")
+    assert [e["issue_date"] for e in written] == [
+        "2026-10-19", "2026-10-26", "2026-11-02", "2026-11-09", "2026-11-16", "2026-11-23"]
+    assert {(e["type"], e["kind"], e["bundle"]) for e in written} == {("not_issued", "exploratory", "dev-2")}
+
+
+@pytest.fixture
+def command(tmp_path, monkeypatch):
+    """`evidence issue` on a ledger at 16 Nov 10:30 UTC; returns its status and the slots then in the ledger."""
+    lg = late_ledger(tmp_path / "ledger/mandi-wheat")
+    fc.write_record(lg.root, record(TOTALS_30_OF_51))
+    monkeypatch.setattr(cli, "_git", lambda repo, *args: (CODE + "\n").encode())
+    monkeypatch.setattr(cli, "Ledger", lambda root: L.Ledger(root, clock=lambda: LATE_NOW))
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+
+    def run(*args):
+        status = cli.main(["issue", *args, "--repo", str(tmp_path)])
+        return status, [(e["type"], e["id"]) for kind in ("exploratory", "live")
+                        for e in lg.read(f"claims/{kind}.jsonl")]
+
+    return run
+
+
+def test_the_issue_command_uses_dev_2_unless_told_another_bundle(command, capsys):
+    assert command("--date", "2026-11-16") == (0, [("claim", "mandi-wheat:exploratory:dev-2:district:2026-11-16")])
+    # The first development bundle still issues its own dates, and still ends at 15 Nov.
+    assert command("--date", "2026-11-16", "--bundle", "dev")[0] == 1
+    assert "2026-11-16 is not an issue date" in capsys.readouterr().err
+    assert command("--date", "2026-10-19", "--bundle", "dev") == (0, [
+        ("claim", "mandi-wheat:exploratory:dev-2:district:2026-11-16"),
+        ("claim", "mandi-wheat:exploratory:dev:district:2026-10-19"),
+    ])
+
+
+def test_the_backfill_command_uses_dev_2_unless_told_another_bundle(command):
+    status, written = command("--backfill-missing", "--year", "2026")
+    assert status == 0
+    assert written == [("not_issued", f"mandi-wheat:exploratory:dev-2:district:{day}")
+                       for day in ("2026-10-19", "2026-10-26", "2026-11-02", "2026-11-09")]
+
+
+def test_a_development_bundle_is_exploratory_on_a_workflow_and_any_other_name_is_live(command, tmp_path, monkeypatch):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    bundles = tmp_path / "ledger/mandi-wheat/bundles"
+    shutil.copytree(bundles / "dev-2", bundles / "devel")
+    assert command("--date", "2026-11-16", "--bundle", "dev-2") == (
+        0, [("claim", "mandi-wheat:exploratory:dev-2:district:2026-11-16")])
+    assert command("--date", "2026-11-16", "--bundle", "devel") == (0, [
+        ("claim", "mandi-wheat:exploratory:dev-2:district:2026-11-16"),
+        ("claim", "mandi-wheat:live:devel:district:2026-11-16"),
+    ])
