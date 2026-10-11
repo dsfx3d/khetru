@@ -13,6 +13,10 @@ whatever ``kind`` the verdict bands are issued as.
 A slot is written once: issuing a date again writes nothing. ``backfill_missing``
 records ``not_issued`` for slots whose window started with no claim (R10a); it
 never writes a claim. ``check`` re-derives every claim from the files it names.
+
+A band and issue date are held under one development bundle only, so no date
+is scored twice in the exploratory file: ``issue`` refuses a date another
+development bundle holds, and ``backfill_missing`` leaves it alone.
 """
 
 import hashlib
@@ -109,13 +113,22 @@ def _slots(ledger: L.Ledger, kind: str) -> tuple[dict[str, str], set[str]]:
     return kinds, taken
 
 
+def _held_elsewhere(ledger: L.Ledger, bundle: str) -> dict[tuple[str, str], str]:
+    """(band, issue date) -> the other development bundle holding that slot; empty unless ``bundle`` is one."""
+    if not L.is_development(bundle):
+        return {}
+    return {(e["band"], e["issue_date"]): e["bundle"] for e in ledger.read(kind_file("exploratory"))
+            if e["type"] in L.SLOT_TYPES and e["bundle"] != bundle and L.is_development(e["bundle"])}
+
+
 def issue(ledger: L.Ledger, issue_date: date, *, bundle: str, kind: str, code: str,
           source: str = "opendata", abstain_if_missing: bool = False) -> list[dict]:
     """Append ``issue_date``'s claim for every verdict band and view that has none; returns what was written.
 
     Refuses before the run can be available, and refuses a ``live`` claim once
-    its window has started. With no saved record it refuses too, unless
-    ``abstain_if_missing`` says the source is known to be unavailable (R5).
+    its window has started. Under a development bundle it refuses a date that
+    another development bundle holds. With no saved record it refuses too,
+    unless ``abstain_if_missing`` says the source is known to be unavailable (R5).
     """
     b = Bundle(ledger.root, bundle)
     times = semantics.schedule(b.sem, issue_date)
@@ -131,6 +144,13 @@ def issue(ledger: L.Ledger, issue_date: date, *, bundle: str, kind: str, code: s
     if all(L.slot_id(ledger.name, k, bundle, band, issue_date.isoformat()) in taken
            for band, k in kinds.items()):
         return []
+    held = _held_elsewhere(ledger, bundle)
+    for band in kinds:
+        if (band, issue_date.isoformat()) in held:
+            other = held[band, issue_date.isoformat()]
+            raise claim_core.ClaimError(
+                f"{issue_date} already has a {band} slot under development bundle {other}; "
+                f"a date is issued under one development bundle only, so nothing is written under {bundle}")
     saved = ledger.root / forecasts.record_path(source, times.run_init)
     if not saved.exists():
         if not abstain_if_missing:
@@ -148,9 +168,13 @@ def issue(ledger: L.Ledger, issue_date: date, *, bundle: str, kind: str, code: s
 
 
 def backfill_missing(ledger: L.Ledger, year: int, *, bundle: str, kind: str) -> list[dict]:
-    """Append ``not_issued`` for every slot of ``year`` whose window started with no entry (R10a)."""
+    """Append ``not_issued`` for every slot of ``year`` whose window started with no entry (R10a).
+
+    Under a development bundle, a slot another development bundle holds has its entry already and is left alone.
+    """
     b = Bundle(ledger.root, bundle)
     kinds, taken = _slots(ledger, kind)
+    held = _held_elsewhere(ledger, bundle)
     now = ledger.clock()
     written = []
     for issue_date in semantics.issue_dates(b.sem, year):
@@ -158,7 +182,7 @@ def backfill_missing(ledger: L.Ledger, year: int, *, bundle: str, kind: str) -> 
             continue
         for band, k in kinds.items():
             new = L.not_issued(ledger=ledger.name, kind=k, bundle=bundle, band=band, issue_date=issue_date)
-            if new["id"] not in taken:
+            if new["id"] not in taken and (band, new["issue_date"]) not in held:
                 written.append(ledger.append(kind_file(k), new))
     return written
 

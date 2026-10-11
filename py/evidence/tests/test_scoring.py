@@ -6,7 +6,7 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
-from claim_fixtures import CODE, DEV_BUNDLE, MONDAY
+from claim_fixtures import CODE, DEV_BUNDLE, MONDAY, make_ledger
 from khetru_evidence import bands as B
 from khetru_evidence import claim_core as C
 from khetru_evidence import claims, cli, forecasts as fc, obs_core as O, observations, score_core as S, scoring, semantics
@@ -93,6 +93,52 @@ def test_the_claims_own_season_is_left_out_of_its_climatology(tmp_path):
     issue(lg)
     [entry] = score(lg, FINAL)
     assert (entry["climatology_events"], entry["climatology_windows"], entry["provisional"]) == (15, 45, False)
+
+
+def test_a_dev_2_claim_issued_on_7_dec_is_scored_against_the_december_windows_of_every_season(tmp_path):
+    lg = scoring_ledger(tmp_path / "mandi-wheat", datetime(2026, 12, 16, 6, tzinfo=UTC), days=92)
+    claim = issue(lg, date(2026, 12, 7), bundle="dev-2")
+    save_rain(lg.root, date(2026, 12, 9), week(10.0), "realtime-r20261216")
+
+    [entry] = score(lg, "realtime-r20261216")
+
+    assert (entry["claim_id"], entry["bundle"], entry["outcome"]) == (claim["id"], "dev-2", "held")
+    assert (entry["window_start"], entry["window_end"]) == ("2026-12-08T03:00:00Z", "2026-12-15T03:00:00Z")
+    # Windows starting 2 to 16 Dec in each of three seasons; every one of 2023's held.
+    assert (entry["climatology_probability"], entry["climatology_events"], entry["climatology_windows"]) == (
+        CLIMATOLOGY, 15, 45)
+    assert "observations/imd-final-r20261010-20251001-20251231.json.gz" in entry["evidence"]
+    assert scoring.check(lg, EXPLORATORY) == []
+
+
+def test_a_season_with_no_december_is_left_out_of_a_dev_2_claims_climatology(tmp_path):
+    lg = make_ledger(tmp_path / "mandi-wheat", datetime(2026, 12, 2, 6, tzinfo=UTC))
+    for year, mm, days in ((2023, 20.0, 92), (2024, 0.0, 92), (2025, 20.0, 61)):
+        save_rain(lg.root, date(year, 10, 1), [mm] * days, FINAL)
+    issue(lg, date(2026, 11, 23), bundle="dev-2")
+    save_rain(lg.root, date(2026, 11, 25), week(10.0), "realtime-r20261202")
+
+    [entry] = score(lg, "realtime-r20261202")
+
+    # 2025 ends on 30 Nov. Its 7 windows that start by 24 Nov are whole, but they are the
+    # early half of the pool only, so the season does not count at all.
+    assert (entry["climatology_events"], entry["climatology_windows"]) == (15, 30)
+
+
+def test_a_final_vintage_with_no_december_at_all_is_refused_for_a_dev_2_claim(tmp_path):
+    lg = scoring_ledger(tmp_path / "mandi-wheat", datetime(2026, 12, 16, 6, tzinfo=UTC))
+    issue(lg, date(2026, 11, 30), bundle="dev-2")
+    issue(lg, date(2026, 12, 7), bundle="dev-2")
+    save_rain(lg.root, date(2026, 12, 2), [10.0] + [0.0] * 13, "realtime-r20261216")
+
+    with pytest.raises(O.ObservationError, match="holds no season with every date of October to December"):
+        score(lg, "realtime-r20261216")
+    assert not (lg.root / SCORES).exists()
+    # The first development bundle's windows and cutoff end in November, so the same vintage serves it.
+    issue(lg)
+    save_rain(lg.root, WINDOW_FIRST, week(10.0), REALTIME)
+    assert [e["climatology_windows"] for e in score(L.Ledger(lg.root, clock=lg.clock), REALTIME)
+            if e["bundle"] == "dev"] == [45]
 
 
 def test_abstain_not_issued_voided_and_late_claims_each_score_a_brier_difference_of_exactly_0(tmp_path, sem):
@@ -295,6 +341,29 @@ def test_the_score_command_prints_outcomes_and_counts_but_no_brier_or_skill(tmp_
     assert "never written from a local machine" in capsys.readouterr().err
 
 
+def test_the_score_command_refuses_live_claims_under_a_bundle_with_no_recorded_tag(tmp_path, monkeypatch, capsys):
+    lg = scoring_ledger(tmp_path / "ledger/mandi-wheat")
+    shutil.copytree(lg.root / "bundles/dev", lg.root / "bundles/v1")
+    issue(lg, kind="live", bundle="v1")
+    save_rain(lg.root, WINDOW_FIRST, week(10.0), REALTIME)
+    monkeypatch.setattr(cli, "_git", lambda repo, *args: (CODE + "\n").encode())
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(cli, "Ledger", lambda root: L.Ledger(root, clock=lambda: AFTER_WINDOW))
+    args = ["score", "--repo", str(tmp_path), "--vintage", REALTIME, "--kind", "live"]
+
+    assert cli.main(args) == 2
+    assert "bundle v1 is not a development bundle (dev, dev-*) and has no tag recorded in tags.jsonl" in capsys.readouterr().err
+    assert not (lg.root / "scores").exists()
+
+    lg.append("tags.jsonl", L.tag(ledger=lg.name, name="mandi-wheat/bundle-v1", commit=CODE))
+    assert cli.main(args) == 0
+    # No proof says when the claim was attested yet, so its score waits.
+    assert capsys.readouterr().out.splitlines() == [
+        "evidence score: nothing to write",
+        "evidence score: live current scores: 0 held, 0 not_held, 0 unverifiable",
+    ]
+
+
 # --- skill, bootstrap and verdicts -------------------------------------------
 
 
@@ -412,6 +481,17 @@ def test_skill_is_held_back_for_a_bundle_with_no_recorded_tag(ledger):
     score(ledger)
     with pytest.raises(S.ScoreError, match="held back"):
         scoring.standing(ledger, SCORES, "dev")
+
+
+def test_skill_is_held_back_for_a_development_bundle_even_when_a_tag_names_it(ledger):
+    issue(ledger)
+    save_rain(ledger.root, WINDOW_FIRST, week(10.0), REALTIME)
+    score(ledger)
+    for bundle in ("dev", "dev-2"):
+        ledger.append("tags.jsonl", L.tag(ledger=ledger.name, name=f"mandi-wheat/bundle-{bundle}", commit=CODE))
+        assert scoring.is_tagged(ledger, bundle)
+        with pytest.raises(S.ScoreError, match=f"bundle {bundle} is a development bundle.*held back"):
+            scoring.standing(ledger, SCORES, bundle)
 
 
 def test_standing_reads_skill_episodes_and_cost_loss_from_a_tagged_bundles_scores(tmp_path):

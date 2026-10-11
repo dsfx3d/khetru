@@ -1,0 +1,21 @@
+# Second development bundle, claim rule.
+#
+# Why it exists: on 2026-10-11 the owner decided that issue dates run to 7 Dec.
+# bundles/ is write-once, so `dev` stays as it was and `dev-2` holds the later
+# end (see bundle.toml). A bundle needs its own claim rule file; every value
+# here is the one in `bundles/dev/claims.toml`.
+#
+# These are still untagged development values. The owner freezes the bundle v1
+# values at U8.
+
+[claims]
+# Name of the claim rule (R4). A later rule is a new name, never an edit.
+rule = "ens-exceedance-1"
+crop_stage = "wheat sowing"
+
+# The claim is "at least threshold_mm of band-mean rain over the claim window".
+threshold_mm = 10.0
+
+# Probability from k, the members whose band-mean window total reaches the
+# threshold, out of n members (KTD5). Never 0 or 1; nothing is fitted to outcomes.
+probability_formula = "(k + 0.5) / (n + 1)"

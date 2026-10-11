@@ -88,10 +88,20 @@ def test_key_order_does_not_change_bytes():
     assert L.encode(a) == '{"a":[1,2],"b":{"x":"ठंड","y":1},"kind":"exploratory"}\n'.encode()
 
 
-def test_dev_bundle_entries_are_always_exploratory(lg):
-    with pytest.raises(L.LedgerError, match="dev bundle"):
-        lg.append("claims/live.jsonl", claim(kind="live"))
+@pytest.mark.parametrize("bundle", ["dev", "dev-2", "dev-3"])
+def test_development_bundle_entries_are_always_exploratory(lg, bundle):
+    with pytest.raises(L.LedgerError, match="development bundle"):
+        lg.append("claims/live.jsonl", claim(kind="live", bundle=bundle))
     assert not (lg.root / "claims/live.jsonl").exists()
+    assert lg.append(CLAIMS, claim(bundle=bundle))["kind"] == "exploratory"
+
+
+def test_a_development_bundle_is_dev_or_a_name_starting_with_dev_dash(lg):
+    assert [name for name in ("dev", "dev-2", "dev-", "devel", "v1", "v1-dev", "DEV", "")
+            if L.is_development(name)] == ["dev", "dev-2", "dev-"]
+    assert L.is_development(L.CURRENT_DEV_BUNDLE) and L.CURRENT_DEV_BUNDLE == "dev-2"
+    # Any other name keeps its behaviour: it may hold live entries.
+    assert lg.append("claims/live.jsonl", claim(kind="live", bundle="devel"))["kind"] == "live"
 
 
 def test_file_placement_by_kind(lg):

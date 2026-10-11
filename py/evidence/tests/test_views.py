@@ -279,8 +279,10 @@ def test_standing_never_counts_a_view_even_under_a_tagged_bundle(tmp_path):
     assert scoring.registered(viewed.read("scores/exploratory.jsonl")) == []
 
 
-def test_the_commands_issue_score_and_check_the_view_and_print_no_brier_or_skill(tmp_path, monkeypatch, capsys):
-    lg = add_view(scoring_ledger(tmp_path / "ledger/mandi-wheat"))
+@pytest.mark.parametrize("named, bundle", [([], "dev-2"), (["--bundle", "dev"], "dev")], ids=["default", "dev"])
+def test_the_commands_issue_score_and_check_the_view_and_print_no_brier_or_skill(
+        tmp_path, monkeypatch, capsys, named, bundle):
+    lg = add_view(scoring_ledger(tmp_path / "ledger/mandi-wheat", days=92))
     fc.write_record(lg.root, uneven_record())
     save_rain(lg.root, WINDOW_FIRST, week(10.0), REALTIME)
     monkeypatch.setattr(cli, "_git", lambda repo, *args: (CODE + "\n").encode())
@@ -288,11 +290,11 @@ def test_the_commands_issue_score_and_check_the_view_and_print_no_brier_or_skill
     monkeypatch.setattr(cli, "Ledger", lambda root: L.Ledger(root, clock=lambda: AFTER_WINDOW))
     repo = ["--repo", str(tmp_path)]
 
-    assert cli.main(["issue", "--date", "2026-10-19", *repo]) == 0
+    assert cli.main(["issue", "--date", "2026-10-19", *named, *repo]) == 0
     assert capsys.readouterr().out.splitlines() == [
-        "evidence issue: claim mandi-wheat:exploratory:dev:district:2026-10-19: "
+        f"evidence issue: claim mandi-wheat:exploratory:{bundle}:district:2026-10-19: "
         "≥10 mm rain in band district within 7 days: 57%",
-        f"evidence issue: claim mandi-wheat:exploratory:dev:{VIEW}:2026-10-19: "
+        f"evidence issue: claim mandi-wheat:exploratory:{bundle}:{VIEW}:2026-10-19: "
         f"≥10 mm rain in band {VIEW} within 7 days: 1%",
     ]
     assert cli.main(["issue", "--check", *repo]) == 0
@@ -301,8 +303,8 @@ def test_the_commands_issue_score_and_check_the_view_and_print_no_brier_or_skill
     assert cli.main(["score", "--vintage", REALTIME, *repo]) == 0
     out = capsys.readouterr().out
     assert out.splitlines() == [
-        f"evidence score: mandi-wheat:exploratory:dev:district:2026-10-19@{REALTIME}: held (provisional)",
-        f"evidence score: mandi-wheat:exploratory:dev:{VIEW}:2026-10-19@{REALTIME}: held (provisional)",
+        f"evidence score: mandi-wheat:exploratory:{bundle}:district:2026-10-19@{REALTIME}: held (provisional)",
+        f"evidence score: mandi-wheat:exploratory:{bundle}:{VIEW}:2026-10-19@{REALTIME}: held (provisional)",
         "evidence score: exploratory current scores: 1 held, 0 not_held, 0 unverifiable",
         f"evidence score: exploratory current scores, {VIEW} (a view, never part of a verdict): "
         "1 held, 0 not_held, 0 unverifiable",

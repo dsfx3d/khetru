@@ -2,7 +2,8 @@
 
 Records are loaded by vintage name, so a provisional and a final copy of the
 same day never mix. ``base_rates`` renders ``ledger/mandi-wheat/base-rates.md``
-from committed files only: the same files always give the same text.
+from committed files only: the same files always give the same text. Another
+bundle's rule values give their own table, ``base-rates-<bundle>.md``.
 """
 
 import hashlib
@@ -15,10 +16,12 @@ from pathlib import Path
 import numpy as np
 
 from khetru_evidence import bands, obs_core, semantics
+from khetru_evidence.ledger import DEV_BUNDLE, is_development
 
 LEDGER = "mandi-wheat"
 BASE_RATES_PATH = "base-rates.md"
-DEV_BUNDLE_DIR = "bundles/dev"
+# The bundle behind ``base-rates.md`` and the power tables, which stay reproducible from it.
+DEV_BUNDLE_DIR = f"bundles/{DEV_BUNDLE}"
 THRESHOLDS_MM = (2.0, 5.0, 10.0, 20.0)
 SEASON_MONTHS = (10, 11)
 
@@ -51,12 +54,36 @@ def load_band_map(ledger_root: Path) -> bands.BandMap:
     return bands.decode((ledger_root / bands.BAND_MAP_PATH).read_bytes())
 
 
-def full_years(series: obs_core.Daily) -> list[int]:
-    """Years with every date of October and November in ``series``."""
+def full_years(series: obs_core.Daily, months=SEASON_MONTHS) -> list[int]:
+    """Years with every date of ``months`` (October and November unless given) in ``series``."""
     have = set(series.dates)
     years = sorted({d.year for d in have})
+    first, last = min(months), max(months)
     return [y for y in years
-            if all(d in have for d in obs_core.run_dates(date(y, 10, 1), 61))]
+            if all(d in have for d in obs_core.run_dates(
+                date(y, first, 1), (date(y + last // 12, last % 12 + 1, 1) - date(y, first, 1)).days))]
+
+
+def season_months(sem: semantics.Semantics, rules: obs_core.Rules) -> tuple[int, ...]:
+    """The calendar months a bundle's windows and its sowing cutoff use, in any year."""
+    issue = semantics.issue_dates(sem, 2001)[0]
+    reach = obs_core.imd_dates(semantics.schedule(sem, issue))[-1] - issue
+    final = date(2001, *sem.season_end) + reach  # the last date of a window issued on the season's last day
+    if final.year != 2001:
+        raise obs_core.ObservationError("a window that ends in the next year is not supported")
+    last = max(rules.sowing_cutoff[0], final.month)
+    return tuple(range(sem.season_start[0], last + 1))
+
+
+def months_text(months) -> str:
+    """Months as they are written in a heading, like ``October and November``."""
+    first, last = (f"{date(2000, m, 1):%B}" for m in (months[0], months[-1]))
+    return first if len(months) == 1 else f"{first} {'and' if len(months) == 2 else 'to'} {last}"
+
+
+def base_rates_path(bundle: str = DEV_BUNDLE) -> str:
+    """The table's file: ``base-rates.md`` for ``dev``, ``base-rates-<bundle>.md`` for another bundle."""
+    return BASE_RATES_PATH if bundle == DEV_BUNDLE else f"base-rates-{bundle}.md"
 
 
 def missing_cells(series: obs_core.Daily, band_map: bands.BandMap, months=SEASON_MONTHS) -> tuple[int, int, int]:
@@ -86,28 +113,38 @@ def day_month(value: tuple[int, int]) -> str:
     return f"{day} {date(2000, month, 1):%b}"
 
 
-def base_rates(ledger_root: Path, vintage: str, provisional: str | None = None) -> str:
+def base_rates(ledger_root: Path, vintage: str, provisional: str | None = None,
+               bundle: str = DEV_BUNDLE) -> str:
     """The base-rate table as Markdown, from the saved records of the final ``vintage``.
 
     ``provisional`` names a real-time vintage to count missing cells in and to
-    set beside the final values where both hold a day.
+    set beside the final values where both hold a day. ``bundle`` names the
+    bundle whose rule values are used; the table of any bundle but ``dev`` says
+    which one it is.
     """
-    bundle = ledger_root / DEV_BUNDLE_DIR
-    sem = semantics.load(bundle / "bundle.toml")
-    rules = obs_core.load_rules(bundle / "observations.toml")
+    directory = ledger_root / "bundles" / bundle
+    sem = semantics.load(directory / "bundle.toml")
+    rules = obs_core.load_rules(directory / "observations.toml")
     band_map = load_band_map(ledger_root)
     series = load(ledger_root, vintage)
-    years = [y for y in full_years(series) if y >= rules.climatology_first_year]
+    months = season_months(sem, rules)
+    years = [y for y in full_years(series, months) if y >= rules.climatology_first_year]
+    named = bundle != DEV_BUNDLE
+    values = (["committed files named below, with the development rule values. The owner chooses the",
+               "bundle v1 values at U8. No forecast enters this table."] if is_development(bundle) else
+              [f"committed files named below, with the rule values of bundle `{bundle}`. No forecast enters",
+               "this table."])
     cutoff = day_month(rules.sowing_cutoff)
     issue = semantics.issue_dates(sem, years[0])[0]
     lead = (obs_core.imd_dates(semantics.schedule(sem, issue))[0] - issue).days
 
     out = [
         "# Mandi wheat base rates from IMD observed rainfall", "",
-        "Generated by `evidence observe base-rates`; do not edit. Every figure comes from the",
-        "committed files named below, with the development rule values. The owner chooses the",
-        "bundle v1 values at U8. No forecast enters this table.", "",
+        f"Generated by `evidence observe base-rates{f' --bundle {bundle}' if named else ''}`; do not edit. "
+        "Every figure comes from the",
+        *values, "",
         "## Inputs", "",
+        *([f"- Rule values: `bundles/{bundle}/`."] if named else []),
         f"- Observations: IMD 0.25° gridded daily rainfall, vintage `{vintage}`,",
         f"  {len(record_files(ledger_root, vintage))} files under `observations/`,",
         f"  set digest `{files_digest(record_files(ledger_root, vintage))}`.",
@@ -127,13 +164,13 @@ def base_rates(ledger_root: Path, vintage: str, provisional: str | None = None) 
         band = obs_core.band_daily(series, band_map, verdict_band, rules.coverage_share)
         out += _band_tables(band, verdict_band, years, sem, rules, cutoff)
 
-    out += ["## Missing cell values, October and November", "",
+    out += [f"## Missing cell values, {months_text(months)}", "",
             "Cell-days are counted over the band map's cells.", "",
             "| Vintage | Days | Cell-days | Missing cell-days | Days with a missing cell |",
             "|---|---|---|---|---|"]
     for name in filter(None, (vintage, provisional)):
         one = series if name == vintage else load(ledger_root, name)
-        gone, size, days = missing_cells(one, band_map)
+        gone, size, days = missing_cells(one, band_map, months)
         out.append(f"| `{name}` | {size // len(band_map.cells)} | {size} | {gone} | {days} |")
     out.append("")
     if provisional:
@@ -243,11 +280,12 @@ def _provisional_table(final, provisional, band_map, rules) -> list[str]:
     return [*out, ""]
 
 
-def write_base_rates(*, repo: Path, vintage: str, provisional: str | None, check: bool) -> int:
-    """Write the table, or with ``check`` exit 1 unless the committed one matches."""
+def write_base_rates(*, repo: Path, vintage: str, provisional: str | None, check: bool,
+                     bundle: str = DEV_BUNDLE) -> int:
+    """Write ``bundle``'s table, or with ``check`` exit 1 unless the committed one matches."""
     ledger_root = repo / "ledger" / LEDGER
-    text = base_rates(ledger_root, vintage, provisional)
-    path = ledger_root / BASE_RATES_PATH
+    text = base_rates(ledger_root, vintage, provisional, bundle)
+    path = ledger_root / base_rates_path(bundle)
     if check:
         if path.exists() and path.read_text(encoding="utf-8") == text:
             print(f"reproduced {path.relative_to(repo)}")

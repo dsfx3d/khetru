@@ -16,6 +16,7 @@ from khetru_evidence import ledger as L
 REPO = Path(__file__).resolve().parents[3]
 REAL_LEDGER = REPO / "ledger/mandi-wheat"
 DEV_BUNDLE = REAL_LEDGER / "bundles/dev"
+DEV_BUNDLE_2 = REAL_LEDGER / "bundles/dev-2"
 
 BAND_MAP = B.BandMap(
     cells=(B.Cell(31.5, 77.0, 300.0, 0.75, B.DISTRICT), B.Cell(31.5, 77.25, 100.0, 0.25, B.DISTRICT)),
@@ -42,8 +43,9 @@ def record(totals, init=datetime(2026, 10, 19, tzinfo=UTC), lons=(77.0, 77.25)) 
 
 
 def make_ledger(root: Path, now: datetime) -> L.Ledger:
-    """A ledger at ``root`` with the dev bundle and the synthetic band map, its clock fixed at ``now``."""
-    shutil.copytree(DEV_BUNDLE, root / "bundles/dev")
+    """A ledger at ``root`` with both development bundles and the synthetic band map, its clock fixed at ``now``."""
+    for bundle in (DEV_BUNDLE, DEV_BUNDLE_2):
+        shutil.copytree(bundle, root / "bundles" / bundle.name)
     (root / "bands").mkdir(parents=True)
     (root / B.BAND_MAP_PATH).write_bytes(B.encode(BAND_MAP))
     return L.Ledger(root, clock=lambda: now)
