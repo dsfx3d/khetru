@@ -1,3 +1,4 @@
+import tomllib
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -51,6 +52,32 @@ def test_issue_dates_are_mondays_in_season_inclusive(sem):
     dates = semantics.issue_dates(sem, 2027)
     assert dates[0] == date(2027, 10, 18)
     assert dates[-1] == date(2027, 11, 15)
+
+
+def test_the_second_development_bundle_issues_every_monday_to_7_dec():
+    dev_2 = semantics.load(DEV_BUNDLE.parents[1] / "dev-2/bundle.toml")
+    assert semantics.issue_dates(dev_2, 2026) == [
+        date(2026, 10, 19), date(2026, 10, 26), date(2026, 11, 2), date(2026, 11, 9),
+        date(2026, 11, 16), date(2026, 11, 23), date(2026, 11, 30), date(2026, 12, 7),
+    ]
+    # The last window is IMD's 9 to 15 Dec, closing at 03 UTC on the 15th.
+    assert semantics.schedule(dev_2, date(2026, 12, 7)).window_end == at(2026, 12, 15, 3)
+    with pytest.raises(ValueError, match="not an issue date"):
+        semantics.schedule(dev_2, date(2026, 12, 14))
+
+
+def test_the_second_development_bundle_differs_from_the_first_in_three_values_only():
+    def tables(name):
+        return {p.name: tomllib.loads(p.read_text()) for p in sorted((DEV_BUNDLE.parents[1] / name).glob("*.toml"))}
+
+    first, second = tables("dev"), tables("dev-2")
+    assert second["bundle.toml"]["bundle"]["name"] == "dev-2"
+    assert second["bundle.toml"]["semantics"]["season_end"] == "12-07"
+    assert second["observations.toml"]["observations"]["sowing_cutoff"] == "12-16"
+    second["bundle.toml"]["bundle"]["name"] = "dev"
+    second["bundle.toml"]["semantics"]["season_end"] = "11-15"
+    second["observations.toml"]["observations"]["sowing_cutoff"] = "11-30"
+    assert second == first
 
 
 @pytest.mark.parametrize("bad", [date(2026, 10, 20), date(2026, 10, 12), date(2026, 11, 16)])

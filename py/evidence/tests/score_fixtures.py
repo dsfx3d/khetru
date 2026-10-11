@@ -37,15 +37,18 @@ def save_rain(root: Path, first: date, daily, vintage: str) -> None:
 
 
 def week(total: float | None) -> list:
-    """Seven days from 21 Oct 2026 whose rain adds up to ``total``; None leaves a day with no value."""
+    """Seven days whose rain adds up to ``total``; None leaves a day with no value."""
     return [None] + [0.0] * 6 if total is None else [total] + [0.0] * 6
 
 
-def scoring_ledger(root: Path, now: datetime = AFTER_WINDOW) -> L.Ledger:
-    """A ledger with the dev bundle, the synthetic band map and the final vintage for climatology."""
+def scoring_ledger(root: Path, now: datetime = AFTER_WINDOW, days: int = 61) -> L.Ledger:
+    """A ledger with the development bundles, the synthetic band map and the final vintage for climatology.
+
+    ``days`` is how many dates from 1 Oct each season holds: 61 ends on 30 Nov, 92 on 31 Dec.
+    """
     lg = make_ledger(root, now)
     for year, mm in ((2023, 20.0), (2024, 0.0), (2025, 0.0)):
-        save_rain(lg.root, date(year, 10, 1), [mm] * 61, FINAL)
+        save_rain(lg.root, date(year, 10, 1), [mm] * days, FINAL)
     return lg
 
 

@@ -12,9 +12,14 @@ A slot waits, with nothing written, while its window is open, while the vintage
 does not hold every date of the window, and while a real-time claim's timing is
 pending. ``check`` re-derives every score from the files it names.
 
+Climatology pools the seasons of the bundle's final vintage that hold every
+date of the months the bundle's windows and sowing cutoff use, the same seasons
+the bundle's base-rate table counts. With no such season a score is refused.
+
 ``standing`` reads a scores file back into what the pass/fail rule needs. It
-refuses a bundle with no recorded tag, so development data never shows skill
-against climatology (KTD11); ``outcomes`` is the count that may always be shown.
+refuses a development bundle, and any bundle with no recorded tag, so
+development data never shows skill against climatology (KTD11); ``outcomes`` is
+the count that may always be shown.
 
 An exploratory view (``views``) is scored like a verdict band, with its own
 cell weights. ``registered`` leaves its scores out, and ``standing`` reads
@@ -145,8 +150,15 @@ class _Scorer:
         share, obs = bundle.coverage_share, bundle.observations
         area = self.area(slot["band"])
         year = date.fromisoformat(slot["issue_date"]).year
-        years = [y for y in observations.full_years(final.series)
+        # A season counts only when the final vintage holds every month the bundle's windows use.
+        months = observations.season_months(bundle.sem, obs)
+        years = [y for y in observations.full_years(final.series, months)
                  if y >= obs.climatology_first_year and y != year]
+        if not years:
+            raise obs_core.ObservationError(
+                f"vintage {rules.climatology_vintage} holds no season with every date of "
+                f"{observations.months_text(months)}, which bundle {bundle.name}'s windows use; "
+                "climatology has nothing to pool")
         climatology = obs_core.climatology(
             final.band(area.band_map, slot["band"], share), dates[0], years=years, days=len(dates),
             threshold_mm=bundle.rule.threshold_mm, half_window_days=obs.climatology_half_window_days,
@@ -248,6 +260,7 @@ class Standing:
 
 
 def is_tagged(ledger: L.Ledger, bundle: str) -> bool:
+    """Whether ``tags.jsonl`` records the tag of ``bundle``."""
     return any(t["name"] == f"{ledger.name}/bundle-{bundle}" for t in ledger.tags())
 
 
@@ -256,6 +269,10 @@ def standing(ledger: L.Ledger, scores_rel: str, bundle: str) -> Standing:
 
     Registered bands only: a view's scores are left out, under any bundle.
     """
+    if L.is_development(bundle):
+        raise score_core.ScoreError(
+            f"bundle {bundle} is a development bundle (dev, dev-*); skill against climatology is held back "
+            "for one, whatever tag is recorded (KTD11)")
     if not is_tagged(ledger, bundle):
         raise score_core.ScoreError(
             f"bundle {bundle} has no recorded tag; skill against climatology is held back until it has (KTD11)")

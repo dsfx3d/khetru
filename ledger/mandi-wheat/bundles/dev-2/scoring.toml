@@ -1,0 +1,36 @@
+# Second development bundle, scoring and pass/fail rule.
+#
+# Why it exists: on 2026-10-11 the owner decided that issue dates run to 7 Dec.
+# bundles/ is write-once, so `dev` stays as it was and `dev-2` holds the later
+# end (see bundle.toml). A bundle needs its own scoring file; every value here
+# is the one in `bundles/dev/scoring.toml`.
+#
+# These are still untagged development values. The owner freezes the bundle v1
+# values at U8, with the power simulation.
+
+[scoring]
+# IMD final vintage the climatology probability is computed from. A claim's own
+# season is always left out. U8 replaces this with frozen tables.
+climatology_vintage = "final-r20261010"
+
+# Pass needs the lower confidence bound of the Brier skill score against
+# climatology to be above skill_threshold (R13).
+skill_threshold = 0.0
+
+# Minimum independent rain episodes, positive and negative each (R10, KTD8).
+min_episodes = 12
+
+# Two-sided confidence level of the bootstrap intervals.
+confidence = 0.9
+
+# Live check (R13): pass when the upper bound of (hindcast skill - live skill)
+# is below the margin, fail when the lower bound is above it.
+noninferiority_margin = 0.1
+
+# Cluster bootstrap (KTD8): whole seasons for the hindcast, issue dates for a
+# live season.
+bootstrap_seed = 20261008
+bootstrap_resamples = 10000
+
+# Cost-loss ratios the relative economic value must be above zero at (KTD13).
+cost_loss_ratios = [0.08, 0.2, 0.34]

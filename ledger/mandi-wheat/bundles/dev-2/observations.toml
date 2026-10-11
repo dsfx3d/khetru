@@ -1,0 +1,36 @@
+# Second development bundle, observation rules.
+#
+# Why it exists: on 2026-10-11 the owner decided that issue dates run to 7 Dec.
+# bundles/ is write-once, so `dev` stays as it was and `dev-2` holds the later
+# end (see bundle.toml). Only `sowing_cutoff` differs from
+# `bundles/dev/observations.toml`.
+#
+# These are still untagged development values. The owner freezes the bundle v1
+# values at U8.
+
+[observations]
+# Share of a verdict band's weight that must hold a value; below it an observed
+# day has no band value and its window is `unverifiable` (KTD4). The same share
+# applies to forecasts.
+coverage_share = 1.0
+
+# Independent rain episodes (KTD8): a day whose band mean reaches wet_day_mm is
+# a wet day; wet days with fewer than dry_day_gap_days dry days between them
+# are one episode.
+wet_day_mm = 1.0
+dry_day_gap_days = 3
+
+# Climatology: IMD final years from climatology_first_year on. A window's
+# probability pools every window starting within climatology_half_window_days
+# of its calendar date, and is (events + pseudo) / (windows + 2 * pseudo).
+climatology_first_year = 1991
+climatology_half_window_days = 7
+climatology_pseudo_count = 0.5
+
+# Last IMD date (MM-DD) counted for "next rain before the sowing cutoff".
+# `dev` has 30 Nov, which the owner dropped on 2026-10-11. 16 Dec is the end of
+# the last wheat sowing week (10 to 16 Dec) in the CSK HPKV guidance this
+# project uses. The date is an agent's choice, open for the owner. The last
+# issue date's window is IMD's 9 to 15 Dec at the latest, so every issue date
+# has 7 dates in a row before the cutoff.
+sowing_cutoff = "12-16"
