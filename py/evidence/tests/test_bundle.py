@@ -2,6 +2,7 @@
 
 import dataclasses
 import hashlib
+import shutil
 from datetime import date, timedelta
 
 import numpy as np
@@ -18,6 +19,7 @@ SMALL = bundle.Design(
 )
 YEARS = (1991, 2002, 2003)
 VIEW = bundle.DECEMBER.views[0]
+LEDGER_ROOT = DEV_BUNDLE.parents[1]  # the committed ledger: its bundles and its tables, never its IMD files
 
 
 @pytest.fixture
@@ -474,7 +476,7 @@ def test_the_existing_variants_keep_their_values_and_seed_streams():
     assert (december.name, december.path, december.made) == ("december", "power-december.md", "2026-10-11")
     assert (december.season_end, december.sowing_cutoff, december.views) == ((12, 14), (12, 16), (VIEW,))
     assert (december.until_stream, december.simulate_stream) == (2, 3)
-    assert (december.title, december.after, december.owner_dates) == ("", (), False)
+    assert (december.title, december.after, december.owner_chose, december.issued_from) == ("", (), "", "")
 
 
 def test_no_row_of_the_december_7_variant_shares_a_seed_with_another_run(rules):
@@ -501,6 +503,7 @@ def test_no_row_of_the_december_7_variant_shares_a_seed_with_another_run(rules):
 
 def test_december_7_table_says_whose_the_values_are_and_that_nothing_is_left_out(tmp_path):
     view_ledger(tmp_path)
+    shutil.rmtree(tmp_path / "bundles/dev-2", ignore_errors=True)  # the table names this bundle and does not read it
 
     text = bundle.power(tmp_path, SMALL, bundle.DECEMBER_7)
 
@@ -514,9 +517,16 @@ def test_december_7_table_says_whose_the_values_are_and_that_nothing_is_left_out
             "Both tables are unchanged.") in header
     assert "the last issue date is 7 Dec where the first run has 15 Nov" in header
     assert "the sowing cutoff is 16 Dec where it has 30 Nov" in header
+    # Where the two values are held: not in `bundles/dev`, which the table reads; in `bundles/dev-2`, which it does not.
+    assert ("Two development values are changed in code: the last issue date is 7 Dec" in header
+            and "no bundle holds them" not in header)
+    assert ("Every other value is the first run's, read from `bundles/dev`, which holds neither changed value. "
+            "The development bundle `bundles/dev-2` holds the same two, for issuing claims; "
+            "this table does not read it.") in header
     assert "No seed is shared with an earlier table or between the two areas." in header
     # Whose the values are: the owner's issue dates, as a starting value; the cutoff is still the agent's.
-    assert "The issue dates are the owner's choice" in header
+    assert ("The issue dates are the owner's choice, made on 2026-10-11 after reading `power-december.md`: "
+            "each Monday from 15 Oct to 7 Dec.") in header
     assert "a starting value for bundle v1 and not a frozen one" in header
     assert "The cutoff of 16 Dec is still the agent's choice and open for the owner." in header
     assert "The owner has not chosen these values" not in header
@@ -528,7 +538,9 @@ def test_december_7_table_says_whose_the_values_are_and_that_nothing_is_left_out
     for gone in ("leaves out", "three options", "Left out", "shorter run", "windows end after it, on",
                  "Windows ending after the cutoff", "none in"):
         assert gone not in header, gone
-    assert "For a window starting 4 Dec it pools the starts 27 Nov to 10 Dec, 14 of 15." in header
+    # The starts pooled for 4 Dec run to 10 Dec, later than 4 Dec: so "those", not "the earlier ones".
+    assert ("pools fewer starts: only those that still have room. "
+            "For a window starting 4 Dec it pools the starts 27 Nov to 10 Dec, 14 of 15.") in header
     assert "| `district` | 2 | 366 | 0 | 0 | 186 | 0 | 0 |" in text
     district, view = text.index("## Verdict band `district`"), text.index(f"## Exploratory view `{VIEW}`")
     assert district < view
@@ -538,32 +550,100 @@ def test_december_7_table_says_whose_the_values_are_and_that_nothing_is_left_out
     assert text.count("#### Hindcast pass rate by true skill") == 4
 
 
-def test_december_7_table_leaves_the_other_two_tables_as_they_are(tmp_path, capsys):
-    root = tmp_path / "ledger" / observations.LEDGER
-    view_ledger(root)
-    assert bundle.write_power(repo=tmp_path, check=False, design=SMALL) == 0
-    assert bundle.write_power(repo=tmp_path, check=False, design=SMALL, variant=bundle.DECEMBER) == 0
-    before = [(root / v.path).read_bytes() for v in (bundle.FIRST_RUN, bundle.DECEMBER)]
+def test_the_bundle_named_for_issuing_holds_the_december_7_values(sem, obs_rules, december_7):
+    variant = bundle.DECEMBER_7
+    held = LEDGER_ROOT / variant.issued_from
 
-    assert bundle.write_power(repo=tmp_path, check=True, design=SMALL, variant=bundle.DECEMBER_7) == 1
-    assert bundle.write_power(repo=tmp_path, check=False, design=SMALL, variant=bundle.DECEMBER_7) == 0
-    assert bundle.write_power(repo=tmp_path, check=True, design=SMALL, variant=bundle.DECEMBER_7) == 0
-    assert "wrote ledger/mandi-wheat/power-december-7.md" in capsys.readouterr().out
-    assert [(root / v.path).read_bytes() for v in (bundle.FIRST_RUN, bundle.DECEMBER)] == before
+    assert variant.issued_from == "bundles/dev-2"
+    assert (semantics.load(held / "bundle.toml").season_end, O.load_rules(held / "observations.toml").sowing_cutoff
+            ) == (variant.season_end, variant.sowing_cutoff) == ((12, 7), (12, 16))
+    # `bundles/dev`, which the simulation reads, holds neither.
+    assert (sem.season_end, obs_rules.sowing_cutoff) == ((11, 15), (11, 30))
+    assert observations.DEV_BUNDLE_DIR == "bundles/dev"
+
+
+def test_the_date_the_owner_chose_is_not_the_date_the_recount_was_made(sem, obs_rules):
+    variant = dataclasses.replace(bundle.DECEMBER_7, made="2026-10-20")
+    assert (bundle.DECEMBER_7.owner_chose, bundle.DECEMBER.owner_chose, bundle.FIRST_RUN.owner_chose
+            ) == ("2026-10-11", "", "")
+
+    note = " ".join(bundle._recount_note(variant, (sem, obs_rules), *bundle.values(variant, sem, obs_rules)))
+
+    assert "This is a recount made on 2026-10-20, after the first run" in note
+    assert "The issue dates are the owner's choice, made on 2026-10-11 after reading `power-december.md`:" in note
+
+
+def test_a_recount_of_the_owners_dates_made_after_no_other_recount_names_no_table_read(sem, obs_rules):
+    variant = dataclasses.replace(bundle.DECEMBER_7, after=())
+
+    note = " ".join(bundle._recount_note(variant, (sem, obs_rules), *bundle.values(variant, sem, obs_rules)))
+
+    assert "The issue dates are the owner's choice, made on 2026-10-11: each Monday from 15 Oct to 7 Dec." in note
+    assert "after reading" not in note
+    assert "whose table is `power.md` and is unchanged." in note
+
+
+def test_a_recount_made_after_two_others_names_both(sem, obs_rules):
+    variant = dataclasses.replace(bundle.DECEMBER_7, after=("power-december.md", "power-december-7.md"))
+
+    note = " ".join(bundle._recount_note(variant, (sem, obs_rules), *bundle.values(variant, sem, obs_rules)))
+
+    assert ("after the first run, whose table is `power.md`, and after the recounts `power-december.md` and "
+            "`power-december-7.md`. All these tables are unchanged.") in note
+    assert "Both tables" not in note
+
+
+def test_climatology_pools_every_start_when_each_has_room(tmp_path):
+    view_ledger(tmp_path)
+    # Issue dates to 15 Nov with a cutoff of 16 Dec: a window starts on 17 Nov at the latest, and the latest
+    # start its climatology then pools, 24 Nov, is before 10 Dec, the last start with room.
+    variant = bundle.Variant("late-cutoff", "power-late-cutoff.md", made="2026-10-11", sowing_cutoff=(12, 16),
+                             until_stream=6, simulate_stream=7)
+
+    text = bundle.power(tmp_path, SMALL, variant)
+
+    header = " ".join(text[:text.index("## Verdict band")].split())
+    assert "- The climatology of rain before the cutoff pools every start: each has room." in header
+    assert "pools fewer starts" not in header
+    assert "A window that starts after 10 Dec has no room for them, and none here does." in header
+
+
+def test_a_cutoff_that_leaves_no_window_room_is_an_error(sem, obs_rules):
+    early = dataclasses.replace(obs_rules, sowing_cutoff=(10, 20))  # the earliest window starts on 17 Oct
+
+    with pytest.raises(ValueError, match="no window has room for 7 dates before the sowing cutoff of 20 Oct"):
+        bundle._last_start(YEARS, sem, early)
+    assert bundle._last_start(YEARS, sem, obs_rules) == date(2000, 11, 13)  # the window of Monday 11 Nov 2002
+
+
+@pytest.mark.parametrize("variant", [bundle.FIRST_RUN, bundle.DECEMBER, bundle.DECEMBER_7], ids=lambda v: v.path)
+def test_each_table_opens_with_the_text_its_committed_file_has(tmp_path, variant):
+    """The text above "## Inputs" comes from the variant and the dev bundle, not from rainfall or the simulation."""
+    view_ledger(tmp_path)
+    committed = (LEDGER_ROOT / variant.path).read_text(encoding="utf-8")
+
+    text = bundle.power(tmp_path, SMALL, variant)
+
+    assert text[:text.index("## Inputs")] == committed[:committed.index("## Inputs")]
 
 
 def test_the_december_table_keeps_the_header_text_it_was_committed_with(tmp_path):
     view_ledger(tmp_path)
+    committed = (LEDGER_ROOT / bundle.DECEMBER.path).read_text(encoding="utf-8")
 
     header = bundle.power(tmp_path, SMALL, bundle.DECEMBER)
 
     assert header.startswith("# Mandi wheat power simulation: December recount\n")
     for line in (
-        "This is a recount made on 2026-10-11, after the first run, whose table is `power.md` and",
+        "values are changed in code, and no bundle holds them: the last issue date is 14 Dec",
+        "30 Nov. Every other value is the first run's. The exploratory views named in the",
         "No seed is shared between the two tables or between the two areas. The confidence and",
         "The owner has not chosen these values. The cutoff, the last issue date and the rule for",
+        "  A window that starts after 10 Dec has no room for them. Its issue date is left out of",
         "- There were three options for such an issue date: leave it out (taken here); count it as",
+        "- Near the season's end the climatology of rain before the cutoff pools fewer starts: only the",
         "  earlier ones that still have room. For a window starting 10 Dec it pools the starts",
         "  3 to 10 Dec, 8 of 15.",
     ):
         assert f"\n{line}\n" in header, line
+        assert f"\n{line}\n" in committed, line

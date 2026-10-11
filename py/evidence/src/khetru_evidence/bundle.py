@@ -18,8 +18,11 @@ Every verdict is then read with the ``score_core`` functions the real record
 will use.
 
 A ``Variant`` is a recount made after the first run with some development
-values changed in code; no bundle is written for it. It has its own output
-file and its own seed positions, and the first run's table does not change.
+values changed in code; no bundle is written for it, and it reads every other
+value from ``bundles/dev``. It has its own output file and its own seed
+positions, and the first run's table does not change. A development bundle
+written later for issuing claims may hold the same values (``Variant.issued_from``);
+the simulation does not read it.
 """
 
 import dataclasses
@@ -88,9 +91,13 @@ class Variant:
     simulate_stream: int = 1
     title: str = ""  # after "Mandi wheat power simulation: "; the capitalised name and "recount" when empty
     after: tuple[str, ...] = ()  # the tables of the earlier recounts this one was made after
-    # Whether the issue dates are the owner's choice. They are then a starting value for bundle v1,
-    # which the owner freezes at the tag; when not, they are the agent's and open for the owner.
-    owner_dates: bool = False
+    # The date the owner chose the issue dates: the decision's date, which `made` is not. They are
+    # then a starting value for bundle v1, which the owner freezes at the tag. Empty when the issue
+    # dates are the agent's and open for the owner.
+    owner_chose: str = ""
+    # The development bundle, under the ledger root, that holds the two changed values for issuing
+    # claims. The table names it and does not read it. Empty when no bundle holds them.
+    issued_from: str = ""
 
 
 FIRST_RUN = Variant(None, POWER_PATH)
@@ -100,10 +107,12 @@ DECEMBER = Variant("december", "power-december.md", made="2026-10-11", season_en
                    sowing_cutoff=(12, 16), views=("view-foothill-cell",), until_stream=2, simulate_stream=3)
 # Issue dates on every Monday to 7 Dec: what the owner chose on 2026-10-11, after reading the December
 # table, as the starting value for bundle v1. The last window then ends by 15 Dec, so no issue date
-# lacks room before the cutoff. The cutoff of 16 Dec is still the agent's choice.
+# lacks room before the cutoff. The cutoff of 16 Dec is still the agent's choice. `bundles/dev-2`
+# holds the same two values for issuing rabi 2026 claims; a test compares them.
 DECEMBER_7 = Variant("december-7", "power-december-7.md", made="2026-10-11", season_end=(12, 7),
                      sowing_cutoff=(12, 16), views=("view-foothill-cell",), until_stream=4, simulate_stream=5,
-                     title="recount for issue dates to 7 Dec", after=(DECEMBER.path,), owner_dates=True)
+                     title="recount for issue dates to 7 Dec", after=(DECEMBER.path,), owner_chose="2026-10-11",
+                     issued_from="bundles/dev-2")
 VARIANTS = {v.name: v for v in (DECEMBER, DECEMBER_7)}
 
 
@@ -169,7 +178,7 @@ def cutoff_climatology(outcome: Callable[[date], str], first: date, *, years, ha
 
     ``outcome`` gives the event's outcome for a window starting on a date. A start
     with no room before the cutoff is not pooled, so near the season's end fewer
-    starts are: only the earlier ones.
+    starts are: only those with room.
     """
     events = windows = 0
     for year in sorted(set(years)):
@@ -484,9 +493,10 @@ def _recount_note(variant, dev, sem, obs_rules) -> list[str]:
             f"This is a recount made on {variant.made}, after the first run, whose table is `{POWER_PATH}` and",
             "is unchanged. It is listed under \"Changes after the run\" in the procedure. Two development",
         ]
-    if variant.owner_dates:
+    if variant.owner_chose:
+        read = f" after reading `{variant.after[-1]}`" if variant.after else ""
         whose = [
-            f"The issue dates are the owner's choice, made on {variant.made} after reading `{variant.after[-1]}`:",
+            f"The issue dates are the owner's choice, made on {variant.owner_chose}{read}:",
             f"each Monday from {day(sem.season_start)} to {day(sem.season_end)}. They are a starting value "
             "for bundle v1 and not a",
             "frozen one: the owner freezes the bundle's values at the tag. The cutoff of "
@@ -499,12 +509,25 @@ def _recount_note(variant, dev, sem, obs_rules) -> list[str]:
             "issue dates with no room before the cutoff are the agent's and open for the owner. That",
             "rule had three options, set out below with what the one taken leaves out.", "",
         ]
+    changed = (f"the last issue date is {day(sem.season_end)}",
+               f"where the first run has {day(dev[0].season_end)}, and the sowing cutoff is "
+               f"{day(obs_rules.sowing_cutoff)} where it has")
+    if variant.issued_from:
+        held = [
+            f"values are changed in code: {changed[0]}", changed[1],
+            f"{day(dev[1].sowing_cutoff)}. Every other value is the first run's, read from "
+            f"`{observations.DEV_BUNDLE_DIR}`, which holds",
+            f"neither changed value. The development bundle `{variant.issued_from}` holds the same two, for",
+            "issuing claims; this table does not read it. The exploratory views named in the",
+        ]
+    else:
+        held = [
+            f"values are changed in code, and no bundle holds them: {changed[0]}", changed[1],
+            f"{day(dev[1].sowing_cutoff)}. Every other value is the first run's. The exploratory views named in the",
+        ]
     return [
         *made,
-        f"values are changed in code, and no bundle holds them: the last issue date is {day(sem.season_end)}",
-        f"where the first run has {day(dev[0].season_end)}, and the sowing cutoff is {day(obs_rules.sowing_cutoff)} "
-        f"where it has",
-        f"{day(dev[1].sowing_cutoff)}. Every other value is the first run's. The exploratory views named in the",
+        *held,
         "variant are counted after the verdict band.", "",
         "Each simulation (one area, event, threshold, season range, true skill and kind of errors)",
         "has a seed of its own, and so has each cell of \"live seasons until a band can be judged\".",
@@ -550,8 +573,12 @@ def _last_start(years, sem, obs_rules) -> date:
     """The latest first date, as a day of the year 2000, of a window with room before the cutoff."""
     starts = (obs_core.imd_dates(semantics.schedule(sem, issue))[0]
               for year in years for issue in semantics.issue_dates(sem, year))
-    return max(first.replace(year=2000) for first in starts
-               if has_room(first, sem.rain_days, obs_rules.sowing_cutoff))
+    with_room = [first.replace(year=2000) for first in starts
+                 if has_room(first, sem.rain_days, obs_rules.sowing_cutoff)]
+    if not with_room:
+        raise ValueError(f"no window has room for {sem.rain_days} dates before the sowing cutoff of "
+                         f"{observations.day_month(obs_rules.sowing_cutoff)}")
+    return max(with_room)
 
 
 def _span(first: date, last: date) -> str:
@@ -607,8 +634,11 @@ def _recount_checks(series, areas, daily, pools, years, short, sem, obs_rules, d
           [f"  A window that starts after {day((latest.month, latest.day))} has no room for them, and none here does.",
            f"  No issue date is left out of that event: {gone} of {slots}. The latest window starts on",
            f"  {day((start.month, start.day))}. The 7-day event keeps every issue date too."]),
-        *(["- Near the season's end the climatology of rain before the cutoff pools fewer starts: only the",
-           f"  earlier ones that still have room. For a window starting {day((start.month, start.day))} "
+        # "Earlier" only when no pooled start is later than the window's own.
+        *(["- Near the season's end the climatology of rain before the cutoff pools fewer starts: only"
+           + (" the" if last_pooled == start else ""),
+           f"  {'earlier ones' if last_pooled == start else 'those'} that still have room. "
+           f"For a window starting {day((start.month, start.day))} "
            "it pools the starts",
            f"  {_span(earliest, last_pooled)}, {pooled} of {2 * half + 1}."]
           if pooled < 2 * half + 1 else

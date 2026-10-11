@@ -8,9 +8,11 @@ simulated at a stated true skill. No real forecast enters this table.
 This is a recount made on 2026-10-11, after the first run, whose table is `power.md`, and
 after the recount `power-december.md`. Both tables are unchanged. It is
 listed under "Changes after the run" in the procedure. Two development
-values are changed in code, and no bundle holds them: the last issue date is 7 Dec
+values are changed in code: the last issue date is 7 Dec
 where the first run has 15 Nov, and the sowing cutoff is 16 Dec where it has
-30 Nov. Every other value is the first run's. The exploratory views named in the
+30 Nov. Every other value is the first run's, read from `bundles/dev`, which holds
+neither changed value. The development bundle `bundles/dev-2` holds the same two, for
+issuing claims; this table does not read it. The exploratory views named in the
 variant are counted after the verdict band.
 
 Each simulation (one area, event, threshold, season range, true skill and kind of errors)
@@ -50,8 +52,8 @@ the agent's choice and open for the owner.
   A window that starts after 10 Dec has no room for them, and none here does.
   No issue date is left out of that event: 0 of 269. The latest window starts on
   9 Dec. The 7-day event keeps every issue date too.
-- Near the season's end the climatology of rain before the cutoff pools fewer starts: only the
-  earlier ones that still have room. For a window starting 9 Dec it pools the starts
+- Near the season's end the climatology of rain before the cutoff pools fewer starts: only
+  those that still have room. For a window starting 9 Dec it pools the starts
   2 to 10 Dec, 9 of 15.
 - The 7-day event is not cut at the cutoff. No window ends after it: 0 of 269. The latest ends on
   15 Dec.
