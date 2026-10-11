@@ -17,7 +17,7 @@ SMALL = bundle.Design(
     season_cap=20,
 )
 YEARS = (1991, 2002, 2003)
-VIEW = "view-east-cell"
+VIEW = bundle.DECEMBER.views[0]
 
 
 @pytest.fixture
@@ -283,14 +283,32 @@ def test_an_issue_date_with_no_room_before_the_cutoff_is_left_out_of_that_event(
     # The window event keeps every issue date.
     windows = bundle.observed_seasons(band, YEARS, late_sem, late_rules, bundle.WINDOW, 10.0)
     assert [(len(s.slots), s.no_room) for s in windows] == [(8, 0)] * 3
+    # What the table's header says of the two choices. 2002's issue date left out had 12 mm between its
+    # window's first date and the cutoff, so a shorter run would have held; 1991's had none.
+    assert bundle._no_room_rain(band, YEARS, late_sem, late_rules, 10.0) == [2002]
+    assert bundle._no_room_rain(band, YEARS, late_sem, late_rules, 20.0) == []
+    # The 7-day windows of 9 Dec end on 17 Dec, after the cutoff; that of 8 Dec 2003 ends on it.
+    assert bundle._past_cutoff(YEARS, late_sem, late_rules) == {
+        "1991-12-09": date(1991, 12, 17), "2002-12-09": date(2002, 12, 17)}
+    assert windows[1].slots[-1].outcome == O.HELD
 
 
 def test_every_first_run_issue_date_has_room_before_the_cutoff(sem, obs_rules):
+    seasons = bundle.observed_seasons(dry_but(), YEARS, sem, obs_rules, bundle.BEFORE_CUTOFF, 10.0)
+    assert [s.no_room for s in seasons] == [0, 0, 0]
+    # Climatology pools starts up to the half-window after the window's own. The latest of them must
+    # have room too, or a first-run "not held" would turn into "left out" with nothing saying so.
+    pooled = timedelta(days=obs_rules.climatology_half_window_days)
+    margins = set()
     for year in range(1991, 2026):
-        seasons = bundle.observed_seasons(dry_but(), YEARS, sem, obs_rules, bundle.BEFORE_CUTOFF, 10.0)
-        assert [s.no_room for s in seasons] == [0, 0, 0]
-        last = semantics.issue_dates(sem, year)[-1]
-        assert bundle.has_room(O.imd_dates(semantics.schedule(sem, last))[0], sem.rain_days, obs_rules.sowing_cutoff)
+        for issue in semantics.issue_dates(sem, year):
+            first = O.imd_dates(semantics.schedule(sem, issue))[0]
+            assert bundle.has_room(first, sem.rain_days, obs_rules.sowing_cutoff), issue
+            assert bundle.has_room(first + pooled, sem.rain_days, obs_rules.sowing_cutoff), issue
+            margins.add(date(year, *obs_rules.sowing_cutoff) - O.run_dates(first + pooled, sem.rain_days)[-1])
+    # No day to spare: the latest pooled start is 24 Nov and its run ends on the cutoff, 30 Nov.
+    assert min(margins) == timedelta(0)
+    assert not bundle.has_room(date(2003, 11, 25), sem.rain_days, obs_rules.sowing_cutoff)
 
 
 def test_a_season_is_counted_only_with_every_date_its_windows_use(december):
@@ -340,9 +358,28 @@ def test_december_table_counts_the_district_and_then_the_view(tmp_path):
     # Rain before the cutoff: 9 Dec of 1991 and of 2002 have no room and are left out.
     assert text.count("| 10 mm | 1991–2003 | 3 | 22 | 2 | 9% | 1 | 3 | 1 |") == 2
     assert "leaves out 2 of 24 issue dates" in text
+    assert "with the development rule values except as noted below; forecasts are" in text
+    # The header's figures are counted from the data. Neither issue date left out had rain before the cutoff.
+    assert "| `district` | 2 | 0 |" in text and f"| `{VIEW}` | 2 | 0 |" in text
+    assert "it pools the starts\n  3 to 10 Dec, 8 of 15." in text
+    # Windows ending after the cutoff: those of 9 Dec 1991 and 2002 (17 Dec). The one held window is not one.
+    assert "2 of 24 windows end after it, on\n  17 Dec: the last one of a season." in text
+    assert text.count("| 1991–2003 | 2 | 0 of 1 |") == 2
+    assert text.count("| 2002–2003 | 1 | 0 of 1 |") == 2
     assert "| `district` | 2 | 366 | 0 | 0 | 186 | 0 | 0 |" in text
     assert f"| `{VIEW}` | 1 | 183 | 0 | 0 | 93 | 0 | 0 |" in text
     assert text.count("#### Hindcast pass rate by true skill") == 4
+
+
+def test_december_table_does_not_change_when_a_view_file_is_added_later(tmp_path):
+    view_ledger(tmp_path)
+    text = bundle.power(tmp_path, SMALL, bundle.DECEMBER)
+    for later in ("view-a-earlier-name", "view-z-later-name"):
+        view = B.BandMap(cells=(B.Cell(31.5, 77.0, 100.0, 1.0, later),), reason="")
+        (tmp_path / f"bands/{later}.csv").write_bytes(B.encode(view))
+
+    assert bundle.DECEMBER.views == ("view-foothill-cell",)
+    assert bundle.power(tmp_path, SMALL, bundle.DECEMBER) == text
 
 
 def test_december_table_is_written_beside_the_first_run_table(tmp_path, capsys):
@@ -367,3 +404,8 @@ def test_bundle_power_command_takes_a_variant(tmp_path, monkeypatch):
     assert calls == [{"repo": tmp_path, "check": True, "variant": bundle.DECEMBER}]
     with pytest.raises(SystemExit):
         cli.main(["bundle", "power", "--variant", "january", "--repo", str(tmp_path)])
+    # The choices are the module's variants: one added there is taken with no change to the command.
+    january = dataclasses.replace(bundle.DECEMBER, name="january")
+    monkeypatch.setitem(bundle.VARIANTS, "january", january)
+    assert cli.main(["bundle", "power", "--variant", "january", "--repo", str(tmp_path)]) == 0
+    assert calls[-1] == {"repo": tmp_path, "check": False, "variant": january}

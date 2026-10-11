@@ -105,7 +105,9 @@ def main(argv: list[str] | None = None) -> int:
         "or check it reproduces; --variant: a recount with later issue dates, in its own table"
     )
     bundle_cmd.add_argument("action", choices=("power",))
-    bundle_cmd.add_argument("--variant", choices=("december",),
+    from khetru_evidence import bundle
+
+    bundle_cmd.add_argument("--variant", choices=tuple(bundle.VARIANTS),
                             help="december: issue dates to 14 Dec, cutoff 16 Dec, the views too; "
                             "writes power-december.md (default: the first run, power.md)")
     bundle_cmd.add_argument("--check", action="store_true", help="exit 1 unless the committed table matches")
