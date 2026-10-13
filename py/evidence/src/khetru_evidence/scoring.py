@@ -225,6 +225,25 @@ def score(ledger: L.Ledger, claims_rel: str, *, vintage: str, code: str,
     return written
 
 
+def due(ledger: L.Ledger, claims_rel: str) -> tuple[date, ...]:
+    """The IMD dates of every closed slot in ``claims_rel`` that has no score yet, in order.
+
+    These are the dates a real-time retrieval has to hold before ``score`` can
+    write anything new. A slot that has a score is left out, so a weekly
+    retrieval never re-scores an earlier week.
+    """
+    scorer = _Scorer(ledger, None)
+    slots, _ = _slots(ledger, claims_rel)
+    scored = {e["claim_id"] for e in ledger.read(scores_file(claims_rel))}
+    now = ledger.clock()
+    dates: set[date] = set()
+    for slot in slots:
+        times, window = scorer.window(slot)
+        if now >= times.window_end and slot["id"] not in scored:
+            dates |= set(window)
+    return tuple(sorted(dates))
+
+
 def check(ledger: L.Ledger, claims_rel: str, attested: Mapping[str, datetime] | None = None) -> list[str]:
     """Every score beside ``claims_rel`` that the files it names no longer reproduce."""
     scorer = _Scorer(ledger, attested)

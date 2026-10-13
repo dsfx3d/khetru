@@ -288,6 +288,14 @@ def test_the_issue_command_uses_dev_2_unless_told_another_bundle(command, capsys
     ])
 
 
+def test_the_issue_command_can_pass_over_a_date_that_is_not_an_issue_date(command, capsys):
+    # 14 Dec 2026 is a Monday after dev-2's last issue date.
+    assert command("--date", "2026-12-14", "--skip-other-dates") == (0, [])
+    assert "2026-12-14 is not an issue date of bundle dev-2" in capsys.readouterr().out
+    assert command("--date", "2026-11-16", "--skip-other-dates") == (
+        0, [("claim", "mandi-wheat:exploratory:dev-2:district:2026-11-16")])
+
+
 def test_the_backfill_command_uses_dev_2_unless_told_another_bundle(command):
     status, written = command("--backfill-missing", "--year", "2026")
     assert status == 0

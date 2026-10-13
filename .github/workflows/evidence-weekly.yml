@@ -1,0 +1,168 @@
+name: evidence-weekly
+
+# Issues and scores the weekly claims for Mandi (U11, KTD12). In rabi 2026 this
+# is a rehearsal: `evidence issue` uses the current development bundle, so every
+# entry is `exploratory`. There is no stamping and no report yet (U8, U10), so
+# the Phase A and Phase B split of KTD12 is two schedules here, not two phases.
+on:
+  schedule:
+    # Mondays 10:30 UTC, with retries at 12:30 and 14:30: issue. The weekday is
+    # the only day field, because cron ORs a day of month with a weekday;
+    # `evidence issue` itself writes nothing on a Monday that is not an issue date.
+    - cron: "30 10 * 10-12 1"
+    - cron: "30 12 * 10-12 1"
+    - cron: "30 14 * 10-12 1"
+    # Tuesday to Thursday 12:00 UTC: score. A window closes at 03:00 UTC on a
+    # Tuesday and IMD's file for that date can be a day late, so a day with
+    # nothing published fails and the next day tries again.
+    - cron: "0 12 * 10-12 2-4"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "issue: save the 00 UTC run and issue the date's claims; score: fetch IMD rain and score closed claims"
+        required: true
+        default: score
+        type: choice
+        options: [issue, score]
+      date:
+        description: "issue: the issue date YYYY-MM-DD (default: today, UTC)"
+        required: false
+        default: ""
+      abstain:
+        description: "issue: with no run to be had, record an abstain instead of failing"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+# Single writer (KTD12): shared with the archive job; never cancels a run in progress.
+concurrency:
+  group: evidence-writer
+  cancel-in-progress: false
+
+jobs:
+  weekly:
+    runs-on: ubuntu-latest
+    # Issuing may first download the 00 UTC run, about 3.5 GB of GRIB ranges.
+    timeout-minutes: 110
+    env:
+      SCHEDULE: ${{ github.event.schedule }}
+      MODE: ${{ inputs.mode }}
+      DATE: ${{ inputs.date }}
+      ABSTAIN: ${{ inputs.abstain }}
+      BRANCH: ${{ github.ref_name }}
+      ROOT: ledger/mandi-wheat
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The branch head, not the trigger commit: a run that waited in the
+          # concurrency group must see what the runs before it pushed.
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: astral-sh/setup-uv@v6
+      # --all-extras: the IMD downloads need the obs extra.
+      - run: uv sync --all-packages --all-extras --locked
+
+      - name: Issue or score, verify, commit and push
+        run: |
+          set -u
+          git config user.name "github-actions[bot]"
+          git config user.email "41898099+github-actions[bot]@users.noreply.github.com"
+
+          case "$SCHEDULE" in
+            "30 14 "*) MODE=issue; ABSTAIN=true ;;  # the last retry (KTD12)
+            "30 "*) MODE=issue ;;
+            "0 12 "*) MODE=score ;;
+          esac
+          day=${DATE:-$(date -u +%F)}
+          status=0
+          evidence() { uv run --all-packages evidence "$@"; }
+          # What the commands print is the job summary: outcomes and counts only
+          # (KTD11). It is written once, from the last pass of `work`.
+          summary=$(mktemp)
+          trap '{ echo "\`\`\`"; cat "$summary"; echo "\`\`\`"; } >> "$GITHUB_STEP_SUMMARY"' EXIT
+          say() { "$@" 2>&1 | tee -a "$summary"; return "${PIPESTATUS[0]}"; }
+
+          # Each command is idempotent, so the whole of `work` can run again on a new head.
+          issue() {
+            # The daily archive saves this run only at 22:00 UTC. A run already saved is skipped.
+            evidence archive --date "$day" --time 0 --source ecmwf \
+              || evidence archive --date "$day" --time 0 --source aws \
+              || echo "the $day 00 UTC run could not be saved from ECMWF or AWS"
+            missing=""
+            [ "$ABSTAIN" = true ] && missing=--abstain-if-missing
+            say evidence issue --date "$day" --skip-other-dates $missing || status=1
+            say evidence issue --backfill-missing || status=1
+          }
+
+          score() {
+            due=$(evidence score --due) || { status=1; return; }
+            if [ -z "$due" ]; then
+              say echo "no closed claim is waiting for a score"
+              return
+            fi
+            # One record of exactly the dates due, so no earlier week is scored again.
+            if ! say evidence observe fetch-realtime --dates $due; then
+              status=1
+              return
+            fi
+            say evidence score --vintage "realtime-r$(date -u +%Y%m%d)" || status=1
+          }
+
+          work() {
+            : > "$summary"
+            "$MODE"
+          }
+
+          # Commits the ledger's new files and lines; returns 1 when there is nothing to commit.
+          commit() {
+            evidence verify --base HEAD || exit 1
+            evidence issue --check || exit 1
+            evidence score --check || exit 1
+            git add -- "$ROOT"
+            git diff --cached --quiet && return 1
+            if [ "$MODE" = issue ]; then
+              git commit -q -m "Issue the $day claims for Mandi"
+            else
+              git commit -q -m "Score closed Mandi claims on IMD real-time rain"
+            fi
+          }
+
+          work
+          if ! commit; then
+            echo "nothing new to commit"
+            exit $status
+          fi
+
+          # Bounded reset-and-redo on a rejected push (KTD12): drop the local
+          # commit, move to the new remote head and do the work again there. The
+          # downloaded records are kept aside so the redo does not fetch them
+          # again; a record the remote already holds stays as the remote has it.
+          # JSONL is never rebased or merged.
+          for attempt in 1 2 3 4 5; do
+            if git push origin "HEAD:refs/heads/$BRANCH"; then
+              exit $status
+            fi
+            echo "push rejected (attempt $attempt); resetting onto the new remote head"
+            kept=$(mktemp -d)
+            git diff-tree --no-commit-id --name-only -r --diff-filter=A HEAD -- "$ROOT/inputs" "$ROOT/observations" \
+              | while read -r f; do mkdir -p "$kept/$(dirname "$f")"; cp "$f" "$kept/$f"; done
+            git fetch origin "$BRANCH"
+            git reset --hard FETCH_HEAD
+            (cd "$kept" && find . -type f) | while read -r f; do
+              [ -e "$f" ] || { mkdir -p "$(dirname "$f")"; cp "$kept/$f" "$f"; }
+            done
+            status=0
+            work
+            if ! commit; then
+              echo "the remote already holds everything this run made"
+              exit $status
+            fi
+            sleep $((attempt * 10))
+          done
+          echo "push still rejected after 5 attempts" >&2
+          exit 1
