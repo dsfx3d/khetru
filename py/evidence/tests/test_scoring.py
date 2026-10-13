@@ -273,6 +273,21 @@ def test_a_slot_waits_while_its_window_is_open_or_the_vintage_lacks_a_date(tmp_p
         score(closed, "realtime-r20270101")
 
 
+def test_the_dates_due_are_those_of_closed_slots_with_no_score(tmp_path):
+    lg = scoring_ledger(tmp_path / "mandi-wheat", datetime(2026, 10, 27, 2, 59, tzinfo=UTC))
+    issue(lg)
+    assert scoring.due(lg, EXPLORATORY) == ()
+
+    # 4 Nov: the 19 and 26 Oct windows have closed, IMD's 21 Oct to 3 Nov.
+    later = L.Ledger(lg.root, clock=lambda: datetime(2026, 11, 4, 6, tzinfo=UTC))
+    issue(lg, date(2026, 10, 26))
+    assert scoring.due(later, EXPLORATORY) == tuple(WINDOW_FIRST + timedelta(days=i) for i in range(14))
+
+    save_rain(lg.root, WINDOW_FIRST, week(10.0), REALTIME)
+    score(later)
+    assert scoring.due(later, EXPLORATORY) == tuple(date(2026, 10, 28) + timedelta(days=i) for i in range(7))
+
+
 def test_scoring_the_same_claim_and_vintage_twice_writes_nothing_the_second_time(ledger):
     issue(ledger)
     save_rain(ledger.root, WINDOW_FIRST, week(10.0), REALTIME)
@@ -339,6 +354,22 @@ def test_the_score_command_prints_outcomes_and_counts_but_no_brier_or_skill(tmp_
     assert cli.main([*args, "--check"]) == 0
     assert cli.main([*args, "--vintage", REALTIME, "--kind", "live"]) == 2
     assert "never written from a local machine" in capsys.readouterr().err
+
+
+def test_the_score_command_prints_the_first_and_last_date_due_or_nothing(tmp_path, monkeypatch, capsys):
+    lg = scoring_ledger(tmp_path / "ledger/mandi-wheat")
+    issue(lg)
+    monkeypatch.setattr(cli, "_git", lambda repo, *args: (CODE + "\n").encode())
+    monkeypatch.setattr(cli, "Ledger", lambda root: L.Ledger(root, clock=lambda: AFTER_WINDOW))
+    args = ["score", "--repo", str(tmp_path)]
+
+    assert cli.main([*args, "--due"]) == 0
+    assert capsys.readouterr().out == "2026-10-21 2026-10-27\n"
+    save_rain(lg.root, WINDOW_FIRST, week(10.0), REALTIME)
+    assert cli.main([*args, "--vintage", REALTIME]) == 0
+    capsys.readouterr()
+    assert cli.main([*args, "--due"]) == 0
+    assert capsys.readouterr().out == ""
 
 
 def test_the_score_command_refuses_live_claims_under_a_bundle_with_no_recorded_tag(tmp_path, monkeypatch, capsys):

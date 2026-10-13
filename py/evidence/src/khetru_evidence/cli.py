@@ -85,6 +85,8 @@ def main(argv: list[str] | None = None) -> int:
     action.add_argument("--check", action="store_true")
     issue_cmd.add_argument("--abstain-if-missing", action="store_true",
                            help="--date: with no saved run, record an abstain instead of failing")
+    issue_cmd.add_argument("--skip-other-dates", action="store_true",
+                           help="--date: on a date that is not an issue date, write nothing and exit 0")
     issue_cmd.add_argument("--year", type=int, help="--backfill-missing: season year (default: this year, UTC)")
     issue_cmd.add_argument("--bundle", default=CURRENT_DEV_BUNDLE,
                            help=f"bundle name (default: {CURRENT_DEV_BUNDLE}, the current development bundle; "
@@ -96,13 +98,15 @@ def main(argv: list[str] | None = None) -> int:
 
     score_cmd = commands.add_parser(
         "score", help="--vintage: append a score against that IMD vintage for every closed claim "
-        "that can take one; --check: re-derive every score"
+        "that can take one; --due: print the first and last IMD date of the closed claims with no "
+        "score yet; --check: re-derive every score"
     )
     action = score_cmd.add_mutually_exclusive_group(required=True)
     action.add_argument("--vintage", help="observation vintage, like realtime-r20261027")
+    action.add_argument("--due", action="store_true")
     action.add_argument("--check", action="store_true")
     score_cmd.add_argument("--kind", default="exploratory", choices=("exploratory", "live"),
-                           help="--vintage: which claims file to score (default: exploratory)")
+                           help="--vintage, --due: which claims file to read (default: exploratory)")
     score_cmd.add_argument("--ledger", default="mandi-wheat")
     score_cmd.add_argument("--repo", type=Path, help="repository root (default: current repo)")
     score_cmd.set_defaults(run=_run_score)
@@ -223,6 +227,12 @@ def _run_issue(args: argparse.Namespace) -> int:
         if kind == "live" and os.environ.get("GITHUB_ACTIONS") != "true":
             print("evidence issue: live entries are never written from a local machine", file=sys.stderr)
             return 2
+        if args.date and args.skip_other_dates:
+            from khetru_evidence import semantics
+
+            if not semantics.is_issue_date(claims.Bundle(ledger.root, args.bundle).sem, args.date):
+                print(f"evidence issue: {args.date} is not an issue date of bundle {args.bundle}; nothing to write")
+                return 0
         if args.backfill_missing:
             year = args.year or datetime.now(UTC).year
             written = claims.backfill_missing(ledger, year, bundle=args.bundle, kind=kind)
@@ -253,6 +263,12 @@ def _run_score(args: argparse.Namespace) -> int:
                 print(problem, file=sys.stderr)
             print(f"evidence score: {len(problems)} problem(s)" if problems else "evidence score: ok")
             return 1 if problems else 0
+        if args.due:
+            # Two dates for `evidence observe fetch-realtime --dates`, or no line when nothing is due.
+            dates = scoring.due(ledger, claims.kind_file(args.kind))
+            if dates:
+                print(dates[0], dates[-1])
+            return 0
         # Live entries are written by the GitHub workflows only (KTD12).
         if args.kind == "live" and os.environ.get("GITHUB_ACTIONS") != "true":
             print("evidence score: live entries are never written from a local machine", file=sys.stderr)

@@ -769,6 +769,7 @@ docs/findings/        # U1 feasibility finding
   - After a simulated non-fast-forward rejection, reset-and-redo leaves each claim appended exactly once.
   - Past window start with no claim, the next run appends `not_issued`.
 - **Verification:** The Sep 2027 exploratory runs commit on schedule, each manifest stamp upgrades with an attested time before window start, and `verify` passes on every push.
+- **Deviation (owner-approved 2026-10-13):** A first `evidence-weekly.yml` is added for rabi 2026, a year before step 2's rehearsal, so the season's `exploratory` claims are issued and scored without the owner running a command. It has the KTD12 retry times, concurrency group and reset-and-redo push. It has no stamping, no report and no `test_weekly.py`, because U8 and U10 do not exist yet; scoring runs on its own schedule from Tuesday to Thursday, not as Phase B of the Monday run, because IMD's real-time file for a date can be a day late. `evidence issue --skip-other-dates` and `evidence score --due` are added for it. The rest of U11 stands.
 
 ---
 

@@ -191,6 +191,34 @@ OpenTimestamps proof of when it was made; there is no stamping yet (U8), so
 live claims are not scored. Exploratory and hindcast claims are timed by when
 their forecast run was available.
 
+## Weekly job
+
+`.github/workflows/evidence-weekly.yml` runs the commands above on a schedule,
+from October to December, so no issue date depends on someone remembering it.
+In rabi 2026 it is a rehearsal: it issues under `dev-2`, so every entry is
+`exploratory`.
+
+- Mondays at 10:30 UTC, and again at 12:30 and 14:30: it saves that day's
+  00 UTC run, from ECMWF and then from the AWS mirror, runs `evidence issue
+  --date <today> --skip-other-dates`, and then `--backfill-missing`. A run that
+  finds no forecast fails and the next one tries again. The 14:30 run passes
+  `--abstain-if-missing`, so a Monday with no forecast by then is an abstain.
+  On a Monday that is not an issue date it writes nothing.
+- Tuesday to Thursday at 12:00 UTC: `evidence score --due` prints the first and
+  last IMD date of the closed claims that have no score. The job fetches those
+  dates as one real-time record and scores against it. A claim is scored once
+  this way, so a later week's retrieval never scores an earlier week again. If
+  IMD has not published a date yet the job fails, and the next day tries again.
+
+Each run checks `evidence verify`, `evidence issue --check` and `evidence score
+--check` before it commits, and pushes to `main` in the same single-writer group
+as the archive job. Its summary on GitHub shows what the commands printed:
+outcomes and counts, never a Brier score or a skill figure. A run can also be
+started by hand from the Actions tab, as `issue` or `score`.
+
+Not in it yet: OpenTimestamps stamping (U8), the report (U10), and scores on
+IMD final data, which are still made by hand with `evidence score --vintage`.
+
 ## Power simulation
 
 `uv run --all-packages evidence bundle power` writes `power.md`: for each
